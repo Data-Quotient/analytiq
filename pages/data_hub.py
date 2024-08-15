@@ -119,6 +119,10 @@ def main():
             handle_data_analysis_tab(st.session_state.filtered_data)
 
         with tabs[3]:
+            selected_version = db.query(DatasetVersion).filter(
+                DatasetVersion.dataset_id == selected_dataset.id,
+                DatasetVersion.version_number == selected_version
+            ).first()
             handle_data_manipulation_tab(st.session_state.filtered_data, selected_version)
 
         st.write(f"Displaying first {data_limit} rows of {dataset_name}")

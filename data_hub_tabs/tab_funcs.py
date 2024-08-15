@@ -138,11 +138,11 @@ def handle_data_quality_tab(filtered_data, dataset_id):
             st.write(f"{violation['severity']}: {violation['message']} in column {violation['column']}")
     else:
         st.success("No data quality issues found!")
-        
+
 def handle_data_manipulation_tab(filtered_data, selected_version):
     """Handles all content and logic within the Data Manipulation Tab."""
     st.header("Data Manipulation")
-
+    
     # Dropdown to select a manipulation action
     action = st.selectbox(
         "Select an Action",
