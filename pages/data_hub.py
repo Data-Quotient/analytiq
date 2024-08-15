@@ -23,13 +23,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Main function
 def main():
     st.title("AnalytiQ")
 
     # Fetch datasets from the database
     db: Session = next(get_db())
     datasets = db.query(Dataset).all()
-    
+
     if not datasets:
         st.write("No datasets available. Please upload a dataset first.")
         return
@@ -43,7 +44,7 @@ def main():
 
     if dataset_name:
         selected_dataset = db.query(Dataset).filter(Dataset.name == dataset_name).first()
-        
+
         # Select version for the selected dataset
         versions = db.query(DatasetVersion).filter(DatasetVersion.dataset_id == selected_dataset.id).all()
         version_names = [version.version_number for version in versions]
@@ -54,12 +55,13 @@ def main():
     # Load the selected dataset with a loading spinner
     if dataset_name:
         data_path = selected_dataset.filepath
-        
+
         with st.spinner(f"Loading {dataset_name}..."):
             selected_data = load_data(data_path, data_limit)
 
-        # Placeholder for flash messages
-        message_placeholder = st.empty()
+        # Store the loaded data in session state to persist changes
+        if "filtered_data" not in st.session_state:
+            st.session_state.filtered_data = selected_data
 
         # Accordion for creating a new version
         with st.expander("Create New Version", expanded=False):
@@ -85,9 +87,8 @@ def main():
                     db.commit()
 
                     # Display success message as a flash message
-                    message_placeholder.success(f"Version '{new_version_name}' created successfully.")
+                    st.success(f"Version '{new_version_name}' created successfully.")
                     time.sleep(3)  # Display the message for 3 seconds
-                    message_placeholder.empty()  # Clear the message
 
                 except Exception as e:
                     db.rollback()
@@ -95,31 +96,30 @@ def main():
 
         # Tabs for different views (e.g., Data View, Analysis, etc.)
         tabs = st.tabs(["Summary", "Data Quality", "Analysis", "Data Manipulation"])
-        
+
         with tabs[0]:
             # Collapsible filters section for Summary tab
             with st.sidebar.expander("Filters", expanded=False):
                 filters = {}
-                for column in selected_data.columns:
-                    unique_vals = selected_data[column].unique()
+                for column in st.session_state.filtered_data.columns:
+                    unique_vals = st.session_state.filtered_data[column].unique()
                     if len(unique_vals) < 100:  # Only show filter options if there are less than 100 unique values
                         filters[column] = st.selectbox(f"Filter by {column}", options=[None] + list(unique_vals))
-                filtered_data = apply_filters(selected_data, filters)
+                st.session_state.filtered_data = apply_filters(st.session_state.filtered_data, filters)
 
-            handle_data_summary_tab(filtered_data)
-        
+            handle_data_summary_tab(st.session_state.filtered_data)
+
         with tabs[1]:
-            handle_data_quality_tab(filtered_data, selected_dataset.id)
-        
+            handle_data_quality_tab(st.session_state.filtered_data, selected_dataset.id)
+
         with tabs[2]:
-            handle_data_analysis_tab(filtered_data)
-        
+            handle_data_analysis_tab(st.session_state.filtered_data)
+
         with tabs[3]:
-            handle_data_manipulation_tab(filtered_data)
+            handle_data_manipulation_tab(st.session_state.filtered_data)
 
         st.write(f"Displaying first {data_limit} rows of {dataset_name}")
-        st.dataframe(filtered_data, use_container_width=True)
-
+        st.dataframe(st.session_state.filtered_data, use_container_width=True)
 
 if __name__ == "__main__":
     main()

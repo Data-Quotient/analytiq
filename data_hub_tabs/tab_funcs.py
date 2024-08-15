@@ -137,7 +137,6 @@ def handle_data_quality_tab(filtered_data, dataset_id):
     else:
         st.success("No data quality issues found!")
 
-
 def handle_data_manipulation_tab(filtered_data):
     """Handles all content and logic within the Data Manipulation Tab."""
     st.header("Data Manipulation")
@@ -162,60 +161,83 @@ def handle_data_manipulation_tab(filtered_data):
         selected_column = st.selectbox("Select Column to Rename", filtered_data.columns)
         new_column_name = st.text_input("Enter New Column Name")
         if st.button("Rename Column"):
-            st.write(f"Renaming column {selected_column} to {new_column_name}")
-            # Logic to rename the column and log the action (to be implemented)
+            filtered_data.rename(columns={selected_column: new_column_name}, inplace=True)
+            st.write(f"Renamed column {selected_column} to {new_column_name}")
 
     elif action == "Change Data Type":
         selected_column = st.selectbox("Select Column to Change Data Type", filtered_data.columns)
         new_data_type = st.selectbox("Select New Data Type", ["int", "float", "str", "bool"])
         if st.button("Change Data Type"):
-            st.write(f"Changing data type of column {selected_column} to {new_data_type}")
-            # Logic to change data type and log the action (to be implemented)
+            try:
+                if new_data_type == "int":
+                    filtered_data[selected_column] = filtered_data[selected_column].astype(int)
+                elif new_data_type == "float":
+                    filtered_data[selected_column] = filtered_data[selected_column].astype(float)
+                elif new_data_type == "str":
+                    filtered_data[selected_column] = filtered_data[selected_column].astype(str)
+                elif new_data_type == "bool":
+                    filtered_data[selected_column] = filtered_data[selected_column].astype(bool)
+                st.write(f"Changed data type of column {selected_column} to {new_data_type}")
+            except ValueError as e:
+                st.error(f"Error changing data type: {e}")
 
     elif action == "Delete Column":
         selected_columns = st.multiselect("Select Columns to Delete", filtered_data.columns)
         if st.button("Delete Columns"):
-            st.write(f"Deleting columns: {', '.join(selected_columns)}")
-            # Logic to delete columns and log the action (to be implemented)
+            filtered_data.drop(columns=selected_columns, inplace=True)
+            st.write(f"Deleted columns: {', '.join(selected_columns)}")
 
     elif action == "Filter Rows":
         filter_condition = st.text_input("Enter Filter Condition (e.g., `age >= 18`)")
         if st.button("Apply Filter"):
-            st.write(f"Applying filter: {filter_condition}")
-            # Logic to filter rows and log the action (to be implemented)
+            try:
+                filtered_data.query(filter_condition, inplace=True)
+                st.write(f"Applied filter: {filter_condition}")
+            except Exception as e:
+                st.error(f"Error applying filter: {e}")
 
     elif action == "Add Calculated Column":
         new_column_name = st.text_input("Enter New Column Name")
         formula = st.text_input("Enter Formula (e.g., `quantity * price`)")
         if st.button("Add Calculated Column"):
-            st.write(f"Adding calculated column {new_column_name} with formula: {formula}")
-            # Logic to add calculated column and log the action (to be implemented)
+            try:
+                filtered_data[new_column_name] = eval(formula, {'__builtins__': None}, filtered_data)
+                st.write(f"Added calculated column {new_column_name} with formula: {formula}")
+            except Exception as e:
+                st.error(f"Error adding calculated column: {e}")
 
     elif action == "Fill Missing Values":
         selected_column = st.selectbox("Select Column to Fill Missing Values", filtered_data.columns)
         fill_method = st.selectbox("Select Fill Method", ["Specific Value", "Mean", "Median", "Mode"])
         fill_value = st.text_input("Enter Value (if 'Specific Value' selected)")
         if st.button("Fill Missing Values"):
-            st.write(f"Filling missing values in column {selected_column} using method: {fill_method}")
-            # Logic to fill missing values and log the action (to be implemented)
+            if fill_method == "Specific Value":
+                filtered_data[selected_column].fillna(fill_value, inplace=True)
+            elif fill_method == "Mean":
+                filtered_data[selected_column].fillna(filtered_data[selected_column].mean(), inplace=True)
+            elif fill_method == "Median":
+                filtered_data[selected_column].fillna(filtered_data[selected_column].median(), inplace=True)
+            elif fill_method == "Mode":
+                filtered_data[selected_column].fillna(filtered_data[selected_column].mode()[0], inplace=True)
+            st.write(f"Filled missing values in column {selected_column} using method: {fill_method}")
 
     elif action == "Duplicate Column":
         selected_column = st.selectbox("Select Column to Duplicate", filtered_data.columns)
         if st.button("Duplicate Column"):
-            st.write(f"Duplicating column: {selected_column}")
-            # Logic to duplicate column and log the action (to be implemented)
+            filtered_data[f"{selected_column}_duplicate"] = filtered_data[selected_column]
+            st.write(f"Duplicated column: {selected_column}")
 
     elif action == "Reorder Columns":
         new_order = st.multiselect("Select Columns in New Order", filtered_data.columns, default=list(filtered_data.columns))
         if st.button("Reorder Columns"):
-            st.write(f"Reordering columns to: {', '.join(new_order)}")
-            # Logic to reorder columns and log the action (to be implemented)
+            filtered_data = filtered_data[new_order]
+            st.write(f"Reordered columns to: {', '.join(new_order)}")
 
     elif action == "Replace Values":
         selected_column = st.selectbox("Select Column to Replace Values", filtered_data.columns)
         to_replace = st.text_input("Value to Replace")
         replace_with = st.text_input("Replace With")
         if st.button("Replace Values"):
-            st.write(f"Replacing {to_replace} with {replace_with} in column {selected_column}")
-            # Logic to replace values and log the action (to be implemented)
+            filtered_data[selected_column].replace(to_replace, replace_with, inplace=True)
+            st.write(f"Replaced {to_replace} with {replace_with} in column {selected_column}")
 
