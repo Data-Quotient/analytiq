@@ -2,7 +2,9 @@ import streamlit as st
 from data_utils import *
 from data_analysis import *
 
-from models import get_db, DQRule  # Import the Dataset model and database session
+import json
+
+from models import get_db, DQRule, DatasetAction, DatasetVersion  # Import the Dataset model and database session
 from sqlalchemy.orm import Session
 
 # Function to display the summary as tiles
@@ -157,12 +159,27 @@ def handle_data_manipulation_tab(filtered_data):
         ]
     )
 
+    db: Session = next(get_db())
+    dataset_version = st.sidebar.selectbox("Select Version", [v.version_number for v in db.query(DatasetVersion).all()])
+    selected_version = db.query(DatasetVersion).filter(DatasetVersion.version_number == dataset_version).first()
+
+    def log_action(version_id, action_type, parameters):
+        """Logs the action to the database."""
+        new_action = DatasetAction(
+            version_id=version_id,
+            action_type=action_type,
+            parameters=json.dumps(parameters)  # Convert parameters to a JSON string
+        )
+        db.add(new_action)
+        db.commit()
+
     if action == "Rename Column":
         selected_column = st.selectbox("Select Column to Rename", filtered_data.columns)
         new_column_name = st.text_input("Enter New Column Name")
         if st.button("Rename Column"):
             filtered_data.rename(columns={selected_column: new_column_name}, inplace=True)
             st.write(f"Renamed column {selected_column} to {new_column_name}")
+            log_action(selected_version.id, "Rename Column", {"old_name": selected_column, "new_name": new_column_name})
 
     elif action == "Change Data Type":
         selected_column = st.selectbox("Select Column to Change Data Type", filtered_data.columns)
@@ -178,6 +195,7 @@ def handle_data_manipulation_tab(filtered_data):
                 elif new_data_type == "bool":
                     filtered_data[selected_column] = filtered_data[selected_column].astype(bool)
                 st.write(f"Changed data type of column {selected_column} to {new_data_type}")
+                log_action(selected_version.id, "Change Data Type", {"column": selected_column, "new_type": new_data_type})
             except ValueError as e:
                 st.error(f"Error changing data type: {e}")
 
@@ -186,6 +204,7 @@ def handle_data_manipulation_tab(filtered_data):
         if st.button("Delete Columns"):
             filtered_data.drop(columns=selected_columns, inplace=True)
             st.write(f"Deleted columns: {', '.join(selected_columns)}")
+            log_action(selected_version.id, "Delete Column", {"columns": selected_columns})
 
     elif action == "Filter Rows":
         filter_condition = st.text_input("Enter Filter Condition (e.g., `age >= 18`)")
@@ -193,6 +212,7 @@ def handle_data_manipulation_tab(filtered_data):
             try:
                 filtered_data.query(filter_condition, inplace=True)
                 st.write(f"Applied filter: {filter_condition}")
+                log_action(selected_version.id, "Filter Rows", {"condition": filter_condition})
             except Exception as e:
                 st.error(f"Error applying filter: {e}")
 
@@ -203,6 +223,7 @@ def handle_data_manipulation_tab(filtered_data):
             try:
                 filtered_data[new_column_name] = eval(formula, {'__builtins__': None}, filtered_data)
                 st.write(f"Added calculated column {new_column_name} with formula: {formula}")
+                log_action(selected_version.id, "Add Calculated Column", {"new_column": new_column_name, "formula": formula})
             except Exception as e:
                 st.error(f"Error adding calculated column: {e}")
 
@@ -213,12 +234,16 @@ def handle_data_manipulation_tab(filtered_data):
         if st.button("Fill Missing Values"):
             if fill_method == "Specific Value":
                 filtered_data[selected_column].fillna(fill_value, inplace=True)
+                log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method, "value": fill_value})
             elif fill_method == "Mean":
                 filtered_data[selected_column].fillna(filtered_data[selected_column].mean(), inplace=True)
+                log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method})
             elif fill_method == "Median":
                 filtered_data[selected_column].fillna(filtered_data[selected_column].median(), inplace=True)
+                log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method})
             elif fill_method == "Mode":
                 filtered_data[selected_column].fillna(filtered_data[selected_column].mode()[0], inplace=True)
+                log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method})
             st.write(f"Filled missing values in column {selected_column} using method: {fill_method}")
 
     elif action == "Duplicate Column":
@@ -226,12 +251,14 @@ def handle_data_manipulation_tab(filtered_data):
         if st.button("Duplicate Column"):
             filtered_data[f"{selected_column}_duplicate"] = filtered_data[selected_column]
             st.write(f"Duplicated column: {selected_column}")
+            log_action(selected_version.id, "Duplicate Column", {"column": selected_column})
 
     elif action == "Reorder Columns":
         new_order = st.multiselect("Select Columns in New Order", filtered_data.columns, default=list(filtered_data.columns))
         if st.button("Reorder Columns"):
             filtered_data = filtered_data[new_order]
             st.write(f"Reordered columns to: {', '.join(new_order)}")
+            log_action(selected_version.id, "Reorder Columns", {"new_order": new_order})
 
     elif action == "Replace Values":
         selected_column = st.selectbox("Select Column to Replace Values", filtered_data.columns)
@@ -240,4 +267,5 @@ def handle_data_manipulation_tab(filtered_data):
         if st.button("Replace Values"):
             filtered_data[selected_column].replace(to_replace, replace_with, inplace=True)
             st.write(f"Replaced {to_replace} with {replace_with} in column {selected_column}")
+            log_action(selected_version.id, "Replace Values", {"column": selected_column, "to_replace": to_replace, "replace_with": replace_with})
 
