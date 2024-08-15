@@ -37,11 +37,12 @@ def main():
                 with open(file_path, "wb") as f:
                     f.write(st.session_state['uploaded_file'].getbuffer())
 
-                # Add the dataset to the database
-                dataset = add_dataset(st.session_state['name'], st.session_state['description'], file_path)
-                st.success(f"Dataset '{dataset.name}' added successfully!")
+                # Add the dataset to the database and create default version
+                dataset_info = add_dataset(st.session_state['name'], st.session_state['description'], file_path)
 
-                st.write("File saved at:", file_path)
+                # Use the accessed attributes
+                st.success(f"Dataset '{dataset_info['name']}' added successfully with a default version!")
+                st.write("File saved at:", dataset_info['filepath'])
 
                 # Clear form fields after successful submission
                 st.session_state['name'] = ''

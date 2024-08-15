@@ -1,18 +1,21 @@
 import subprocess
 import sys
 
+from datetime import datetime
+import json
+
 # Function to install a package if it's not already installed
 def install_package(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 # Check and install SQLAlchemy if not installed
 try:
-    from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
+    from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
     from sqlalchemy.ext.declarative import declarative_base
     from sqlalchemy.orm import relationship, sessionmaker
 except ImportError:
     install_package("SQLAlchemy")
-    from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
+    from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
     from sqlalchemy.ext.declarative import declarative_base
     from sqlalchemy.orm import relationship, sessionmaker
 
@@ -35,9 +38,31 @@ class Dataset(Base):
     description = Column(String)
     filepath = Column(String)
 
-    # Relationship to DQRule
+    # Relationship to DatasetVersion
     rules = relationship("DQRule", back_populates="dataset")
+    versions = relationship("DatasetVersion", back_populates="dataset")
 
+class DatasetVersion(Base):
+    __tablename__ = "dataset_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    version_number = Column(String, nullable=False)
+    description = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    dataset = relationship("Dataset", back_populates="versions")
+    actions = relationship("DatasetAction", back_populates="version")
+
+class DatasetAction(Base):
+    __tablename__ = "dataset_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    version_id = Column(Integer, ForeignKey("dataset_versions.id"), nullable=False)
+    action_type = Column(String, nullable=False)
+    parameters = Column(Text, nullable=False)  # JSON encoded string to store action details
+
+    version = relationship("DatasetVersion", back_populates="actions")
 
 class DQRule(Base):
     __tablename__ = "dq_rules"
