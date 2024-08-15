@@ -59,9 +59,12 @@ def main():
         with st.spinner(f"Loading {dataset_name}..."):
             selected_data = load_data(data_path, data_limit)
 
-        # Store the loaded data in session state to persist changes
+        # Store the original and filtered data in session state to persist changes
+        if "original_data" not in st.session_state:
+            st.session_state.original_data = selected_data  # Keep a copy of the original data
+
         if "filtered_data" not in st.session_state:
-            st.session_state.filtered_data = selected_data
+            st.session_state.filtered_data = selected_data.copy()  # Start with filtered data as a copy of the original
 
         # Accordion for creating a new version
         with st.expander("Create New Version", expanded=False):
@@ -101,11 +104,11 @@ def main():
             # Collapsible filters section for Summary tab
             with st.sidebar.expander("Filters", expanded=False):
                 filters = {}
-                for column in st.session_state.filtered_data.columns:
-                    unique_vals = st.session_state.filtered_data[column].unique()
+                for column in st.session_state.original_data.columns:
+                    unique_vals = st.session_state.original_data[column].unique()
                     if len(unique_vals) < 100:  # Only show filter options if there are less than 100 unique values
                         filters[column] = st.selectbox(f"Filter by {column}", options=[None] + list(unique_vals))
-                st.session_state.filtered_data = apply_filters(st.session_state.filtered_data, filters)
+                st.session_state.filtered_data = apply_filters(st.session_state.original_data.copy(), filters)
 
             handle_data_summary_tab(st.session_state.filtered_data)
 
