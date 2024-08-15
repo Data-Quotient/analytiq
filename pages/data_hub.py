@@ -3,9 +3,11 @@ from data_utils import *
 from data_analysis import *
 from data_hub_tabs.tab_funcs import *
 
-from models import get_db, Dataset, DatasetVersion  # Import the Dataset and DatasetVersion models
+from models import get_db, Dataset, DatasetVersion, DatasetAction  # Import the models
 from sqlalchemy.orm import Session
 import time
+from datetime import datetime
+import json
 
 # Try to import Plotly and install if not available
 try:
@@ -53,6 +55,12 @@ def main():
 
         selected_version = st.sidebar.selectbox("Select Version", version_names)
         st.sidebar.write(f"Selected Version: {selected_version}")
+
+        # Fetch the selected version object
+        selected_version_obj = db.query(DatasetVersion).filter(
+            DatasetVersion.dataset_id == selected_dataset.id,
+            DatasetVersion.version_number == selected_version
+        ).first()
 
         data_path = selected_dataset.filepath
 
@@ -119,11 +127,30 @@ def main():
             handle_data_analysis_tab(st.session_state.filtered_data)
 
         with tabs[3]:
-            selected_version = db.query(DatasetVersion).filter(
-                DatasetVersion.dataset_id == selected_dataset.id,
-                DatasetVersion.version_number == selected_version
-            ).first()
-            handle_data_manipulation_tab(st.session_state.filtered_data, selected_version)
+            actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version_obj.id).all()
+            st.session_state.actions = actions  # Store actions in session state
+
+            with st.sidebar.expander("Action History", expanded=True):
+                if actions:
+                    for action in actions:
+                        with st.container():
+                            st.write(f"**Action Type:** {action.action_type}")
+                            st.write(f"**Parameters:** {json.dumps(json.loads(action.parameters), indent=2)}")
+                            if st.button(f"Remove Action {action.id}", key=f"remove_{action.id}"):
+                                try:
+                                    db.delete(action)
+                                    db.commit()
+                                    # Update the actions list after deletion
+                                    st.session_state.actions = [a for a in st.session_state.actions if a.id != action.id]
+                                    st.success("Action removed successfully.")
+                                    st.rerun()
+                                except Exception as e:
+                                    db.rollback()
+                                    st.error(f"Failed to delete action: {e}")
+                else:
+                    st.write("No actions applied to this version.")
+
+            handle_data_manipulation_tab(st.session_state.filtered_data, selected_version_obj)
 
         st.write(f"Displaying first {data_limit} rows of {dataset_name}")
         st.dataframe(st.session_state.filtered_data, use_container_width=True)
