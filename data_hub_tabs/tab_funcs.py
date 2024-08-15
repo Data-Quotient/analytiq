@@ -138,8 +138,8 @@ def handle_data_quality_tab(filtered_data, dataset_id):
             st.write(f"{violation['severity']}: {violation['message']} in column {violation['column']}")
     else:
         st.success("No data quality issues found!")
-
-def handle_data_manipulation_tab(filtered_data):
+        
+def handle_data_manipulation_tab(filtered_data, selected_version):
     """Handles all content and logic within the Data Manipulation Tab."""
     st.header("Data Manipulation")
 
@@ -160,8 +160,6 @@ def handle_data_manipulation_tab(filtered_data):
     )
 
     db: Session = next(get_db())
-    dataset_version = st.sidebar.selectbox("Select Version", [v.version_number for v in db.query(DatasetVersion).all()])
-    selected_version = db.query(DatasetVersion).filter(DatasetVersion.version_number == dataset_version).first()
 
     def log_action(version_id, action_type, parameters):
         """Logs the action to the database."""
@@ -268,4 +266,3 @@ def handle_data_manipulation_tab(filtered_data):
             filtered_data[selected_column].replace(to_replace, replace_with, inplace=True)
             st.write(f"Replaced {to_replace} with {replace_with} in column {selected_column}")
             log_action(selected_version.id, "Replace Values", {"column": selected_column, "to_replace": to_replace, "replace_with": replace_with})
-

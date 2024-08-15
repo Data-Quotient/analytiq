@@ -42,7 +42,9 @@ def main():
     dataset_name = st.sidebar.selectbox("Select Dataset", dataset_names)
     data_limit = st.sidebar.number_input("Number of Rows to Fetch", min_value=1, value=1000, step=1000)
 
+    # Load the selected dataset with a loading spinner
     if dataset_name:
+
         selected_dataset = db.query(Dataset).filter(Dataset.name == dataset_name).first()
 
         # Select version for the selected dataset
@@ -52,8 +54,6 @@ def main():
         selected_version = st.sidebar.selectbox("Select Version", version_names)
         st.sidebar.write(f"Selected Version: {selected_version}")
 
-    # Load the selected dataset with a loading spinner
-    if dataset_name:
         data_path = selected_dataset.filepath
 
         with st.spinner(f"Loading {dataset_name}..."):
@@ -116,7 +116,7 @@ def main():
             handle_data_analysis_tab(st.session_state.filtered_data)
 
         with tabs[3]:
-            handle_data_manipulation_tab(st.session_state.filtered_data)
+            handle_data_manipulation_tab(st.session_state.filtered_data, selected_version)
 
         st.write(f"Displaying first {data_limit} rows of {dataset_name}")
         st.dataframe(st.session_state.filtered_data, use_container_width=True)
