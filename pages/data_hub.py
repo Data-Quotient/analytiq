@@ -160,7 +160,6 @@ def main():
                                 # Update the actions list after deletion
                                 actions = [a for a in actions if a.id != action.id]
                                 st.success("Action removed successfully.")
-                                st.session_state.unaltered_data = apply_actions_to_dataset(st.session_state.unaltered_data, actions)
                                 st.rerun()
                             except Exception as e:
                                 db.rollback()
@@ -172,36 +171,32 @@ def main():
 
         with st.spinner(f"Loading {dataset_name}..."):
             selected_data = load_data(data_path, data_limit)
-            st.session_state.original_data = selected_data
             
-        st.session_state.unaltered_data = selected_data
-
-
-        # Apply actions to the dataset
+        # Apply actions to the original data if any
         if actions:
             selected_data = apply_actions_to_dataset(selected_data, actions)
-            st.session_state.original_data = selected_data  # Keep a copy of the original data
+        
+        st.session_state.original_data = selected_data
+        st.session_state.unfiltered_data = selected_data.copy()  # Save a copy for filter options
 
-        # Store the original and filtered data in session state to persist changes
-        if "original_data" not in st.session_state:
-            st.session_state.original_data = selected_data  # Keep a copy of the original data
+        # Sidebar for filter options based on unfiltered data
+        with st.sidebar.expander("Filters", expanded=False):
+            filters = {}
+            for column in st.session_state.unfiltered_data.columns:
+                unique_vals = st.session_state.unfiltered_data[column].unique()
+                if len(unique_vals) < 100:  # Only show filter options if there are less than 100 unique values
+                    filters[column] = st.selectbox(f"Filter by {column}", options=[None] + list(unique_vals))
 
-        if "filtered_data" not in st.session_state:
-            st.session_state.filtered_data = selected_data.copy()  # Start with filtered data as a copy of the original
+            # Apply filters to the original data
+            if filters:
+                st.session_state.filtered_data = apply_filters(st.session_state.original_data.copy(), filters)
+            else:
+                st.session_state.filtered_data = st.session_state.original_data.copy()
 
         # Tabs for different views (e.g., Data View, Analysis, etc.)
         tabs = st.tabs(["Summary", "Data Quality", "Analysis", "Data Manipulation"])
 
         with tabs[0]:
-            # Collapsible filters section for Summary tab
-            with st.sidebar.expander("Filters", expanded=False):
-                filters = {}
-                for column in st.session_state.original_data.columns:
-                    unique_vals = st.session_state.original_data[column].unique()
-                    if len(unique_vals) < 100:  # Only show filter options if there are less than 100 unique values
-                        filters[column] = st.selectbox(f"Filter by {column}", options=[None] + list(unique_vals))
-                st.session_state.filtered_data = apply_filters(st.session_state.original_data.copy(), filters)
-
             handle_data_summary_tab(st.session_state.filtered_data)
 
         with tabs[1]:
@@ -211,10 +206,10 @@ def main():
             handle_data_analysis_tab(st.session_state.filtered_data)
 
         with tabs[3]:
-            handle_data_manipulation_tab(st.session_state.original_data, selected_version_obj)
+            handle_data_manipulation_tab(st.session_state.filtered_data, selected_version_obj)
 
         st.write(f"Displaying first {data_limit} rows of {dataset_name}")
-        st.dataframe(st.session_state.original_data, use_container_width=True)
+        st.dataframe(st.session_state.filtered_data, use_container_width=True)
 
 if __name__ == "__main__":
     main()
