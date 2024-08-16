@@ -176,6 +176,8 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
             st.session_state.actions.append(new_action)
         else:
             st.session_state.actions = [new_action]
+        st.rerun()
+        
 
     # Handling each action
     if action == "Rename Column":
@@ -185,8 +187,6 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
             filtered_data.rename(columns={selected_column: new_column_name}, inplace=True)
             st.write(f"Renamed column {selected_column} to {new_column_name}")
             log_action(selected_version.id, "Rename Column", {"old_name": selected_column, "new_name": new_column_name})
-
-            st.rerun()
 
     elif action == "Change Data Type":
         selected_column = st.selectbox("Select Column to Change Data Type", filtered_data.columns)
@@ -205,7 +205,6 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
                 log_action(selected_version.id, "Change Data Type", {"column": selected_column, "new_type": new_data_type})
             except ValueError as e:
                 st.error(f"Error changing data type: {e}")
-            st.rerun()
             
 
     elif action == "Delete Column":
@@ -214,8 +213,6 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
             filtered_data.drop(columns=selected_columns, inplace=True)
             st.write(f"Deleted columns: {', '.join(selected_columns)}")
             log_action(selected_version.id, "Delete Column", {"columns": selected_columns})
-            st.rerun()
-
 
     elif action == "Filter Rows":
         filter_condition = st.text_input("Enter Filter Condition (e.g., `age >= 18`)")
@@ -226,9 +223,6 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
                 log_action(selected_version.id, "Filter Rows", {"condition": filter_condition})
             except Exception as e:
                 st.error(f"Error applying filter: {e}")
-            st.rerun()
-            
-
     elif action == "Add Calculated Column":
         new_column_name = st.text_input("Enter New Column Name")
         formula = st.text_input("Enter Formula (e.g., `quantity * price`)")
@@ -239,10 +233,6 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
                 log_action(selected_version.id, "Add Calculated Column", {"new_column": new_column_name, "formula": formula})
             except Exception as e:
                 st.error(f"Error adding calculated column: {e}")
-            
-            st.rerun()
-
-
     elif action == "Fill Missing Values":
         selected_column = st.selectbox("Select Column to Fill Missing Values", filtered_data.columns)
         fill_method = st.selectbox("Select Fill Method", ["Specific Value", "Mean", "Median", "Mode"])
@@ -262,9 +252,6 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
                 log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method})
             st.write(f"Filled missing values in column {selected_column} using method: {fill_method}")
 
-            st.rerun()
-
-
     elif action == "Duplicate Column":
         selected_column = st.selectbox("Select Column to Duplicate", filtered_data.columns)
         if st.button("Duplicate Column"):
@@ -272,18 +259,12 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
             st.write(f"Duplicated column: {selected_column}")
             log_action(selected_version.id, "Duplicate Column", {"column": selected_column})
 
-            st.rerun()
-
-
     elif action == "Reorder Columns":
         new_order = st.multiselect("Select Columns in New Order", filtered_data.columns, default=list(filtered_data.columns))
         if st.button("Reorder Columns"):
             filtered_data = filtered_data[new_order]
             st.write(f"Reordered columns to: {', '.join(new_order)}")
             log_action(selected_version.id, "Reorder Columns", {"new_order": new_order})
-            st.rerun()
-            
-
     elif action == "Replace Values":
         selected_column = st.selectbox("Select Column to Replace Values", filtered_data.columns)
         to_replace = st.text_input("Value to Replace")
@@ -292,5 +273,6 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
             filtered_data[selected_column].replace(to_replace, replace_with, inplace=True)
             st.write(f"Replaced {to_replace} with {replace_with} in column {selected_column}")
             log_action(selected_version.id, "Replace Values", {"column": selected_column, "to_replace": to_replace, "replace_with": replace_with})
-            st.rerun()
+
+    st.session_state.original_data = filtered_data
             

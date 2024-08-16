@@ -25,6 +25,58 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def apply_actions_to_dataset(dataset, actions):
+    """
+    Apply a list of actions to a dataset.
+    
+    Args:
+        dataset (DataFrame): The dataset to which actions will be applied.
+        actions (list): List of DatasetAction objects.
+        
+    Returns:
+        DataFrame: The dataset after all actions have been applied.
+    """
+    for action in actions:
+        action_type = action.action_type
+        parameters = json.loads(action.parameters)  # Decode JSON string to dictionary
+        
+        if action_type == "Rename Column":
+            dataset.rename(columns={parameters["old_name"]: parameters["new_name"]}, inplace=True)
+        
+        elif action_type == "Change Data Type":
+            dataset[parameters["column"]] = dataset[parameters["column"]].astype(parameters["new_type"])
+        
+        elif action_type == "Delete Column":
+            dataset.drop(columns=parameters["columns"], inplace=True)
+        
+        elif action_type == "Filter Rows":
+            dataset = dataset.query(parameters["condition"])
+        
+        elif action_type == "Add Calculated Column":
+            dataset[parameters["new_column"]] = eval(parameters["formula"], {'__builtins__': None}, dataset)
+        
+        elif action_type == "Fill Missing Values":
+            if parameters["method"] == "Specific Value":
+                dataset[parameters["column"]].fillna(parameters["value"], inplace=True)
+            elif parameters["method"] == "Mean":
+                dataset[parameters["column"]].fillna(dataset[parameters["column"]].mean(), inplace=True)
+            elif parameters["method"] == "Median":
+                dataset[parameters["column"]].fillna(dataset[parameters["column"]].median(), inplace=True)
+            elif parameters["method"] == "Mode":
+                dataset[parameters["column"]].fillna(dataset[parameters["column"]].mode()[0], inplace=True)
+        
+        elif action_type == "Duplicate Column":
+            dataset[f"{parameters['column']}_duplicate"] = dataset[parameters["column"]]
+        
+        elif action_type == "Reorder Columns":
+            dataset = dataset[parameters["new_order"]]
+        
+        elif action_type == "Replace Values":
+            dataset[parameters["column"]].replace(parameters["to_replace"], parameters["replace_with"], inplace=True)
+
+    return dataset
+
+
 # Main function
 def main():
     st.title("AnalytiQ")
@@ -62,18 +114,6 @@ def main():
             DatasetVersion.version_number == selected_version
         ).first()
 
-        data_path = selected_dataset.filepath
-
-        with st.spinner(f"Loading {dataset_name}..."):
-            selected_data = load_data(data_path, data_limit)
-
-        # Store the original and filtered data in session state to persist changes
-        if "original_data" not in st.session_state:
-            st.session_state.original_data = selected_data  # Keep a copy of the original data
-
-        if "filtered_data" not in st.session_state:
-            st.session_state.filtered_data = selected_data.copy()  # Start with filtered data as a copy of the original
-
         # Accordion for creating a new version
         with st.expander("Create New Version", expanded=False):
             st.write("Use the form below to create a new version of the dataset.")
@@ -105,6 +145,50 @@ def main():
                     db.rollback()
                     st.error(f"Failed to create version: {e}")
 
+        # Logic to delete action before fetching data
+        with st.sidebar.expander("Action History", expanded=True):
+            actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version_obj.id).all()
+            if actions:
+                for action in actions:
+                    with st.container():
+                        st.write(f"**Action Type:** {action.action_type}")
+                        st.write(f"**Parameters:** {json.dumps(json.loads(action.parameters), indent=2)}")
+                        if st.button(f"Remove Action {action.id}", key=f"remove_{action.id}"):
+                            try:
+                                db.delete(action)
+                                db.commit()
+                                # Update the actions list after deletion
+                                actions = [a for a in actions if a.id != action.id]
+                                st.success("Action removed successfully.")
+                                st.session_state.unaltered_data = apply_actions_to_dataset(st.session_state.unaltered_data, actions)
+                                st.rerun()
+                            except Exception as e:
+                                db.rollback()
+                                st.error(f"Failed to delete action: {e}")
+            else:
+                st.write("No actions applied to this version.")
+
+        data_path = selected_dataset.filepath
+
+        with st.spinner(f"Loading {dataset_name}..."):
+            selected_data = load_data(data_path, data_limit)
+            st.session_state.original_data = selected_data
+            
+        st.session_state.unaltered_data = selected_data
+
+
+        # Apply actions to the dataset
+        if actions:
+            selected_data = apply_actions_to_dataset(selected_data, actions)
+            st.session_state.original_data = selected_data  # Keep a copy of the original data
+
+        # Store the original and filtered data in session state to persist changes
+        if "original_data" not in st.session_state:
+            st.session_state.original_data = selected_data  # Keep a copy of the original data
+
+        if "filtered_data" not in st.session_state:
+            st.session_state.filtered_data = selected_data.copy()  # Start with filtered data as a copy of the original
+
         # Tabs for different views (e.g., Data View, Analysis, etc.)
         tabs = st.tabs(["Summary", "Data Quality", "Analysis", "Data Manipulation"])
 
@@ -127,33 +211,10 @@ def main():
             handle_data_analysis_tab(st.session_state.filtered_data)
 
         with tabs[3]:
-            actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version_obj.id).all()
-            st.session_state.actions = actions  # Store actions in session state
-
-            with st.sidebar.expander("Action History", expanded=True):
-                if actions:
-                    for action in actions:
-                        with st.container():
-                            st.write(f"**Action Type:** {action.action_type}")
-                            st.write(f"**Parameters:** {json.dumps(json.loads(action.parameters), indent=2)}")
-                            if st.button(f"Remove Action {action.id}", key=f"remove_{action.id}"):
-                                try:
-                                    db.delete(action)
-                                    db.commit()
-                                    # Update the actions list after deletion
-                                    st.session_state.actions = [a for a in st.session_state.actions if a.id != action.id]
-                                    st.success("Action removed successfully.")
-                                    st.rerun()
-                                except Exception as e:
-                                    db.rollback()
-                                    st.error(f"Failed to delete action: {e}")
-                else:
-                    st.write("No actions applied to this version.")
-
-            handle_data_manipulation_tab(st.session_state.filtered_data, selected_version_obj)
+            handle_data_manipulation_tab(st.session_state.original_data, selected_version_obj)
 
         st.write(f"Displaying first {data_limit} rows of {dataset_name}")
-        st.dataframe(st.session_state.filtered_data, use_container_width=True)
+        st.dataframe(st.session_state.original_data, use_container_width=True)
 
 if __name__ == "__main__":
     main()
