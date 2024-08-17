@@ -35,12 +35,17 @@ except ModuleNotFoundError as e:
     elif missing_package == "scipy":
         from scipy.stats import zscore
 
+from llm.utils import suggest_models, explain_predictions
+from machine_learning.model_mapping import MODEL_MAPPING
+
 # Set page config for dark mode
 st.set_page_config(
     page_title="AnalytiQ",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+
 def handle_ml_tab(filtered_data):
     """Handles all content and logic within the Machine Learning Tab."""
     st.header("Machine Learning Assistant")
@@ -50,19 +55,45 @@ def handle_ml_tab(filtered_data):
         use_case = st.text_area("Describe your use case", placeholder="E.g., I want to predict house prices based on various features.")
 
         st.subheader("2. Select Your Task")
-        task = st.selectbox("What do you want to do?", ["Classification", "Regression", "Clustering", "Other"])
+        task = st.selectbox("What do you want to do?", ["Classification", "Regression", "Clustering", "Anomaly Detection", "Dimensionality Reduction", "Time Series"])
+
+        # Initialize an empty list for suggestions and available models
+        suggested_algorithms = []
+        available_algorithms = MODEL_MAPPING.get(task.lower(), {})
+
+        # Generate data summary and detailed statistics
+        summary = generate_summary(filtered_data)
+        detailed_stats = detailed_statistics(filtered_data)
+        data_head = filtered_data.head()
 
         st.subheader("3. Get Algorithm Suggestions")
         if st.button("Get Suggestions"):
-            st.info("Sending your data and use case to the LLM for algorithm suggestions...")
-            # Placeholder for LLM integration
-            suggested_algorithms = ["Random Forest", "Gradient Boosting", "Support Vector Machine"]
-            st.write("Suggested Algorithms:")
-            for algo in suggested_algorithms:
-                st.write(f"- {algo}")
+            if use_case:
+                st.info("Sending your data and use case to the LLM for algorithm suggestions...")
+                suggested_algorithms = suggest_models(use_case, task.lower(), data_head, summary, detailed_stats)
+                if suggested_algorithms:
+                    st.success(f"Suggested Algorithms: {', '.join(suggested_algorithms)}")
+                else:
+                    st.warning("No suggestions received. Please check your use case description.")
+            else:
+                st.error("Please describe your use case before getting suggestions.")
 
-        st.subheader("4. Model Comparison and Training")
+        st.subheader("4. Select Algorithms to Use")
+        selected_algorithms = st.multiselect(
+            "Select the algorithms you want to run:",
+            options=list(available_algorithms.keys()),
+            default=suggested_algorithms
+        )
+
+        st.subheader("5. Model Comparison and Training")
         st.write("After you get the algorithm suggestions, you can compare models and train the best one.")
+
+        if st.button("Run Selected Models"):
+            if selected_algorithms:
+                st.info(f"Running the following models: {', '.join(selected_algorithms)}")
+                # Here you would implement the logic to run the selected models
+            else:
+                st.error("Please select at least one algorithm to run.")
 
         st.warning("Model comparison and training will be implemented in the next steps.")
 

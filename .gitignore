@@ -1,3 +1,4 @@
 env
 __pycache__
 mydatabase.db
+.streamlit/secrets.toml
