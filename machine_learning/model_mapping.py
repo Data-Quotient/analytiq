@@ -20,7 +20,6 @@ MODEL_MAPPING = {
             "RuleFit": "RuleFit",
             "SVM": "Support Vector Machine (SVM)",
             "GAM": "Generalized Additive Models (GAM)",
-            "H2OAutoML": "H2O AutoML"
         },
         "clustering": {
             "KMeans": "K-Means",

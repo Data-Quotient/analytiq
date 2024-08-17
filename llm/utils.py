@@ -202,3 +202,93 @@ def suggest_target_column(task: str, available_columns: pd.Index, use_case: str,
     suggested_column = get_llm_response(prompt).strip()
    
     return suggested_column
+
+
+def generate_leaderboard_commentary(use_case: str, data_head: pd.DataFrame, selected_models: List[str], leaderboard: pd.DataFrame) -> str:
+    """Generate commentary on the leaderboard from the LLM."""
+    
+    # Convert data head and leaderboard to string for inclusion in the prompt
+    data_head_str = data_head.to_string(index=False)
+    leaderboard_str = leaderboard.to_string(index=False)
+
+    prompt = f"""
+    You are an AI assistant specialized in machine learning. Your task is to provide a commentary on the model leaderboard.
+
+    Use case: {use_case}
+
+    Data Head:
+    {data_head_str}
+
+    Selected Models: {', '.join(selected_models)}
+
+    Leaderboard:
+    {leaderboard_str}
+
+    Please provide a comprehensive analysis of the model performances, including the strengths and weaknesses of the top models, and suggest the most appropriate model for the use case based on the leaderboard results.
+    """
+    
+    leaderboard_commentary = get_llm_response(prompt).strip()
+   
+    return leaderboard_commentary
+
+def explain_predictions_commentary(predictions_df, actual_values: pd.Series = None) -> str:
+    pred_summary = predictions_df['predict'].describe().to_dict()
+    total_predictions = len(predictions_df)
+
+    performance_metrics = ""
+    if actual_values is not None:
+        mse = mean_squared_error(actual_values, predictions_df['predict'])
+        r2 = r2_score(actual_values, predictions_df['predict'])
+        performance_metrics = f"Mean Squared Error: {mse:.4f}\nR-squared: {r2:.4f}"
+
+    prompt = f"""
+    Provide an analysis of the following regression predictions:
+
+    Prediction Summary:
+    {pred_summary}
+    Total Predictions: {total_predictions}
+
+    Performance Metrics:
+    {performance_metrics}
+
+    Please provide insights into the model's predictions, identify patterns, and suggest improvements or business implications.
+    """
+
+    explanation = get_llm_response(prompt)
+    return explanation
+
+
+def explain_feature_importance_commentary(feature_importance_df) -> str:
+    feature_importance_summary = feature_importance_df.describe().to_dict()
+
+    prompt = f"""
+    Analyze the following feature importance summary and provide insights:
+
+    Feature Importance Summary:
+    {feature_importance_summary}
+
+    Provide a comprehensive analysis of how these features likely influence the model's decisions and suggest potential business actions.
+    """
+
+    explanation = get_llm_response(prompt)
+    return explanation
+
+
+def explain_insights_commentary(predictions_df, feature_importance_df) -> str:
+    pred_summary = predictions_df['predict'].describe().to_dict()
+    feature_importance_summary = feature_importance_df.describe().to_dict()
+
+    prompt = f"""
+    Provide a business-oriented analysis of the following machine learning model predictions and feature importance:
+
+    Prediction Summary:
+    {pred_summary}
+
+    Feature Importance Summary:
+    {feature_importance_summary}
+
+    Provide actionable business insights, potential risks, and recommendations for decision-makers.
+    """
+
+    explanation = get_llm_response(prompt)
+    return explanation
