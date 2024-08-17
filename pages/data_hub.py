@@ -3,6 +3,8 @@ from data_utils import *
 from data_analysis import *
 from data_hub_tabs.tab_funcs import *
 
+from machine_learning.utils import *
+
 from models import get_db, Dataset, DatasetVersion, DatasetAction  # Import the models
 from sqlalchemy.orm import Session
 import time
@@ -35,9 +37,10 @@ except ModuleNotFoundError as e:
     elif missing_package == "scipy":
         from scipy.stats import zscore
 
-from llm.utils import suggest_models, explain_predictions
+from llm.utils import suggest_models, explain_predictions, suggest_target_column
 from machine_learning.model_mapping import MODEL_MAPPING
 
+from llm.utils import get_llm_response
 # Set page config for dark mode
 st.set_page_config(
     page_title="AnalytiQ",
@@ -45,10 +48,25 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
 def handle_ml_tab(filtered_data):
     """Handles all content and logic within the Machine Learning Tab."""
     st.header("Machine Learning Assistant")
+
+    # Initialize session state variables if they don't exist
+    if 'aml' not in st.session_state:
+        st.session_state.aml = None
+    if 'test_data' not in st.session_state:
+        st.session_state.test_data = None
+    if 'predictions' not in st.session_state:
+        st.session_state.predictions = None
+    if 'feature_importance' not in st.session_state:
+        st.session_state.feature_importance = None
+    if 'selected_model_id' not in st.session_state:
+        st.session_state.selected_model_id = None
+    if 'explanation' not in st.session_state:
+        st.session_state.explanation = None
+    if 'actual_values' not in st.session_state:
+        st.session_state.actual_values = None
 
     with st.container():
         st.subheader("1. Explain Your Use Case")
@@ -57,21 +75,13 @@ def handle_ml_tab(filtered_data):
         st.subheader("2. Select Your Task")
         task = st.selectbox("What do you want to do?", ["Classification", "Regression", "Clustering", "Anomaly Detection", "Dimensionality Reduction", "Time Series"])
 
-        # Initialize an empty list for suggestions and available models
-        suggested_algorithms = []
-        available_algorithms = MODEL_MAPPING.get(task.lower(), {})
-
-        # Generate data summary and detailed statistics
-        summary = generate_summary(filtered_data)
-        detailed_stats = detailed_statistics(filtered_data)
-        data_head = filtered_data.head()
-
         st.subheader("3. Get Algorithm Suggestions")
         if st.button("Get Suggestions"):
             if use_case:
                 st.info("Sending your data and use case to the LLM for algorithm suggestions...")
-                suggested_algorithms = suggest_models(use_case, task.lower(), data_head, summary, detailed_stats)
+                suggested_algorithms = suggest_models(use_case, task.lower(), filtered_data.head(), generate_summary(filtered_data), detailed_statistics(filtered_data))
                 if suggested_algorithms:
+                    st.session_state.suggested_algorithms = suggested_algorithms
                     st.success(f"Suggested Algorithms: {', '.join(suggested_algorithms)}")
                 else:
                     st.warning("No suggestions received. Please check your use case description.")
@@ -81,22 +91,110 @@ def handle_ml_tab(filtered_data):
         st.subheader("4. Select Algorithms to Use")
         selected_algorithms = st.multiselect(
             "Select the algorithms you want to run:",
-            options=list(available_algorithms.keys()),
-            default=suggested_algorithms
+            options=list(MODEL_MAPPING.get(task.lower(), {}).keys()),
+            default=st.session_state.get('suggested_algorithms', [])
         )
 
-        st.subheader("5. Model Comparison and Training")
+        if task in ["Classification", "Regression", "Time Series"]:
+            st.subheader("5. Get Target Column Suggestion")
+            llm_commentary = None
+            if st.button("Get Suggested Target Column"):
+                try:
+                    # Send the list of available columns, use case, and dataset details to the LLM for suggestion
+                    llm_commentary = suggest_target_column(
+                        task,
+                        filtered_data.columns,
+                        use_case,
+                        filtered_data.head(),
+                        generate_summary(filtered_data),
+                        detailed_statistics(filtered_data)
+                    )
+                    st.session_state.target_column = llm_commentary
+                    st.success(f"Suggested Target Column: {llm_commentary}")
+                except ValueError as e:
+                    st.error(str(e))
+            # Check if the target column exists in the DataFrame before selecting it
+            available_columns = filtered_data.columns
+            default_index = available_columns.get_loc(available_columns[0])
+
+            st.session_state.target_column = st.selectbox(
+                "Select Target Column",
+                available_columns,
+                index=default_index
+            )
+
+        st.subheader("6. Model Comparison and Training")
         st.write("After you get the algorithm suggestions, you can compare models and train the best one.")
 
         if st.button("Run Selected Models"):
             if selected_algorithms:
                 st.info(f"Running the following models: {', '.join(selected_algorithms)}")
-                # Here you would implement the logic to run the selected models
+
+                # Ensure the target_column is set for tasks that require it
+                if task in ["Classification", "Regression", "Time Series"]:
+                    if 'target_column' in st.session_state:
+                        st.session_state.aml, st.session_state.test_data = run_h2o_automl(filtered_data, st.session_state.target_column, task.lower(), selected_algorithms)
+                    else:
+                        st.error("Target column must be selected for this task.")
+                        return
+                else:
+                    st.session_state.aml, st.session_state.test_data = run_h2o_automl(filtered_data, None, task.lower(), selected_algorithms)
+
+                st.write("AutoML completed. Model leaderboard:")
+                leaderboard = st.session_state.aml.leaderboard
+                st.dataframe(leaderboard.as_data_frame().style.highlight_max(axis=0))
+                
+                # Display best model
+                best_model = st.session_state.aml.leader
+                st.markdown(f"**Best model:** {best_model.model_id}")
             else:
                 st.error("Please select at least one algorithm to run.")
 
-        st.warning("Model comparison and training will be implemented in the next steps.")
-
+        if st.session_state.aml is not None:
+            leaderboard = st.session_state.aml.leaderboard
+            model_ids = leaderboard['model_id'].as_data_frame().values.flatten().tolist()
+            st.session_state.selected_model_id = st.selectbox("Select a model to test", model_ids)
+            
+            test_data_option = st.radio("Choose test data", ["Use same data", "Upload new test data"])
+            
+            if test_data_option == "Upload new test data":
+                test_file = st.file_uploader("Choose a CSV file for testing", type="csv")
+                if test_file is not None:
+                    test_data = pd.read_csv(test_file)
+                    st.session_state.test_data = h2o.H2OFrame(test_data)
+                    if task in ["Classification", "Regression", "Time Series"]:
+                        st.session_state.actual_values = test_data[st.session_state.target_column]
+            
+            if st.button("Run selected model"):
+                run_selected_model()
+            
+            if st.session_state.predictions is not None:
+                st.write("Model predictions:")
+                st.dataframe(st.session_state.predictions.as_data_frame())
+                
+                if st.session_state.feature_importance is not None:
+                    st.write("Feature Importance:")
+                    st.dataframe(st.session_state.feature_importance)
+                
+                if st.button("Generate Insightful Explanation"):
+                    with st.spinner("Generating comprehensive analysis..."):
+                        get_explanation()
+                
+                if st.session_state.explanation:
+                    st.write("Prediction Analysis and Business Insights:")
+                    st.markdown(st.session_state.explanation)
+                
+                if st.button("Download model"):
+                    selected_model = h2o.get_model(st.session_state.selected_model_id)
+                    model_path = h2o.download_model(selected_model, path=".")
+                    with open(model_path, "rb") as f:
+                        bytes_data = f.read()
+                    st.download_button(
+                        label="Download PKL file",
+                        data=bytes_data,
+                        file_name=f"{st.session_state.selected_model_id}.pkl",
+                        mime="application/octet-stream"
+                    )
 # Main function
 def main():
     st.title("AnalytiQ")

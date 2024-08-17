@@ -9,7 +9,6 @@ MODEL_MAPPING = {
             "StackedEnsemble": "Stacked Ensemble",
             "RuleFit": "RuleFit",
             "SVM": "Support Vector Machine (SVM)",
-            "H2OAutoML": "H2O AutoML"
         },
         "regression": {
             "GBM": "Gradient Boosting Machine (GBM)",

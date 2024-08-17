@@ -163,3 +163,42 @@ def explain_predictions(predictions_df, problem_type: str, feature_importance: D
     
     explanation = get_llm_response(prompt)
     return explanation
+
+def suggest_target_column(task: str, available_columns: pd.Index, use_case: str, data_head: pd.DataFrame, summary: dict, detailed_stats: pd.DataFrame) -> str:
+    """Suggest the most appropriate target column based on the task, list of available columns, use case, and dataset details."""
+    
+    # Convert columns list to a string
+    columns_str = ", ".join(available_columns)
+    
+    # Convert data head and detailed statistics to string for inclusion in the prompt
+    data_head_str = data_head.to_string(index=False)
+    detailed_stats_str = detailed_stats.to_string(index=False)
+    
+    # Build the prompt
+    prompt = f"""
+    You are an AI assistant specialized in machine learning. Your task is to suggest the most appropriate target column for a {task} task.
+    
+    The use case is: {use_case}.
+    
+    Here is the head of the dataset:
+    {data_head_str}
+    
+    Here is a summary of the dataset:
+    Number of Rows: {summary['Number of Rows']}
+    Number of Columns: {summary['Number of Columns']}
+    Missing Values: {summary['Missing Values']}
+    Duplicate Rows: {summary['Duplicate Rows']}
+    Memory Usage: {summary['Memory Usage (MB)']} MB
+    
+    Here are the detailed statistics for the dataset:
+    {detailed_stats_str}
+    
+    You can ONLY choose one column from the following list of columns: {columns_str}.
+    Do NOT suggest any columns that are not in this list.
+    
+    Please respond with exactly one column name that is most suitable as the target column for the {task} task based on the use case and the provided list.
+    """
+    
+    suggested_column = get_llm_response(prompt).strip()
+   
+    return suggested_column
