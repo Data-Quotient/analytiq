@@ -7,6 +7,34 @@ import json
 from models import get_db, DQRule, DatasetAction, DatasetVersion  # Import the Dataset model and database session
 from sqlalchemy.orm import Session
 
+
+# Try to import necessary packages and install if not available
+# Try to import necessary packages and install if not available
+try:
+    import plotly.express as px
+    from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
+    from scipy.stats import zscore
+except ModuleNotFoundError as e:
+    import subprocess
+    import sys
+    missing_package = str(e).split("'")[1]  # Get the missing package name
+    
+    # Correctly handle the sklearn package by installing scikit-learn
+    if missing_package == 'sklearn':
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn"])
+    elif missing_package == 'plotly':
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "plotly"])
+    elif missing_package == 'scipy':
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "scipy"])
+    
+    # Reimport after installation
+    if missing_package == "plotly":
+        import plotly.express as px
+    elif missing_package == "sklearn":
+        from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
+    elif missing_package == "scipy":
+        from scipy.stats import zscore
+
 # Function to display the summary as tiles
 def display_summary_tiles(summary):
     """Displays the summary statistics in a tile format."""
@@ -276,3 +304,96 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
 
     st.session_state.original_data = filtered_data
             
+
+
+
+# Function to handle the Preprocessing Tab
+def handle_preprocessing_tab(filtered_data, selected_version):
+    """Handles all content and logic within the Preprocessing Tab."""
+    st.header("Data Preprocessing")
+
+    # Dropdown to select a preprocessing action
+    action = st.selectbox(
+        "Select a Preprocessing Action",
+        [
+            "Scale Data",
+            "Encode Categorical Variables",
+            "Impute Missing Values",
+            "Remove Outliers"
+        ]
+    )
+
+    db: Session = next(get_db())
+
+    def log_action(version_id, action_type, parameters):
+        """Logs the action to the database."""
+        new_action = DatasetAction(
+            version_id=version_id,
+            action_type=action_type,
+            parameters=json.dumps(parameters)  # Convert parameters to a JSON string
+        )
+        db.add(new_action)
+        db.commit()
+        # After logging the action, update the session state and the history
+        if "actions" in st.session_state:
+            st.session_state.actions.append(new_action)
+        else:
+            st.session_state.actions = [new_action]
+        st.rerun()
+
+    # Handling each preprocessing action
+    if action == "Scale Data":
+        selected_columns = st.multiselect("Select Columns to Scale", filtered_data.columns)
+        scaling_method = st.selectbox("Select Scaling Method", ["StandardScaler", "MinMaxScaler"])
+        if st.button("Scale Data"):
+            scaler = StandardScaler() if scaling_method == "StandardScaler" else MinMaxScaler()
+            filtered_data[selected_columns] = scaler.fit_transform(filtered_data[selected_columns])
+            st.write(f"Scaled columns: {', '.join(selected_columns)} using {scaling_method}")
+            log_action(selected_version.id, "Scale Data", {"columns": selected_columns, "method": scaling_method})
+
+    elif action == "Encode Categorical Variables":
+        selected_columns = st.multiselect("Select Columns to Encode", filtered_data.select_dtypes(include=['object']).columns)
+        encoding_type = st.selectbox("Select Encoding Type", ["OneHotEncoding", "LabelEncoding"])
+        if st.button("Encode Data"):
+            if encoding_type == "OneHotEncoding":
+                encoder = OneHotEncoder(sparse_output=False, drop='first')  # Updated to use sparse_output
+                encoded_data = encoder.fit_transform(filtered_data[selected_columns])
+                encoded_df = pd.DataFrame(encoded_data, columns=encoder.get_feature_names_out(selected_columns))
+                filtered_data.drop(columns=selected_columns, inplace=True)
+                filtered_data = pd.concat([filtered_data, encoded_df], axis=1)
+            else:
+                encoder = LabelEncoder()
+                for col in selected_columns:
+                    filtered_data[col] = encoder.fit_transform(filtered_data[col])
+            st.write(f"Encoded columns: {', '.join(selected_columns)} using {encoding_type}")
+            log_action(selected_version.id, "Encode Data", {"columns": selected_columns, "type": encoding_type})
+
+    elif action == "Impute Missing Values":
+        selected_columns = st.multiselect("Select Columns to Impute", filtered_data.columns)
+        impute_method = st.selectbox("Select Imputation Method", ["Mean", "Median", "Mode"])
+        if st.button("Impute Missing Values"):
+            for col in selected_columns:
+                if impute_method == "Mean":
+                    filtered_data[col].fillna(filtered_data[col].mean(), inplace=True)
+                elif impute_method == "Median":
+                    filtered_data[col].fillna(filtered_data[col].median(), inplace=True)
+                elif impute_method == "Mode":
+                    filtered_data[col].fillna(filtered_data[col].mode()[0], inplace=True)
+            st.write(f"Imputed missing values in columns: {', '.join(selected_columns)} using {impute_method}")
+            log_action(selected_version.id, "Impute Missing Values", {"columns": selected_columns, "method": impute_method})
+
+    elif action == "Remove Outliers":
+        selected_column = st.selectbox("Select Column to Remove Outliers", filtered_data.columns)
+        method = st.selectbox("Select Outlier Removal Method", ["IQR Method", "Z-Score Method"])
+        if st.button("Remove Outliers"):
+            if method == "IQR Method":
+                Q1 = filtered_data[selected_column].quantile(0.25)
+                Q3 = filtered_data[selected_column].quantile(0.75)
+                IQR = Q3 - Q1
+                filtered_data = filtered_data[~((filtered_data[selected_column] < (Q1 - 1.5 * IQR)) | (filtered_data[selected_column] > (Q3 + 1.5 * IQR)))]
+            elif method == "Z-Score Method":
+                filtered_data = filtered_data[(zscore(filtered_data[selected_column]).abs() < 3)]
+            st.write(f"Removed outliers from column {selected_column} using {method}")
+            log_action(selected_version.id, "Remove Outliers", {"column": selected_column, "method": method})
+
+    st.session_state.original_data = filtered_data
