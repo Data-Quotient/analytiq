@@ -226,4 +226,32 @@ def apply_actions_to_dataset(dataset, actions):
             elif parameters["method"] == "Z-Score Method":
                 dataset = dataset[(zscore(dataset[parameters["column"]]).abs() < 3)]
 
+        elif action_type == "Merge Datasets":
+            from models import get_db, DatasetAction, Dataset, DatasetVersion  # Import the Dataset model and database session
+            from sqlalchemy.orm import Session
+
+            merge_with = parameters["merge_with"]
+            merge_column = parameters["join_column"]
+            join_type = parameters["join_type"]
+            merge_version_num = parameters["merge_version"]
+            
+            # Load the dataset to merge with
+            db: Session = next(get_db())
+
+            selected_dataset = db.query(Dataset).filter(Dataset.id == merge_with).first()
+
+            selected_version = db.query(DatasetVersion).filter(
+                DatasetVersion.dataset_id == selected_dataset.id,
+                DatasetVersion.id == merge_version_num
+            ).first()
+            selected_data = load_data(selected_version.dataset.filepath)
+
+            # Apply actions recorded for the selected version
+            actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version.id).all()
+            if actions:
+                selected_data = apply_actions_to_dataset(selected_data, actions)
+
+            # Perform the merge between the original dataset and the selected merge dataset version
+            dataset = pd.merge(dataset, selected_data, on=merge_column, how=join_type)
+
     return dataset

@@ -7,7 +7,11 @@ from .tabs.ml_tab import handle_ml_tab
 from .tabs.summary_tab import handle_data_summary_tab
 from .tabs.data_analysis_tab import handle_data_analysis_tab
 from .tabs.data_quality_tab import handle_data_quality_tab
-from .tabs.manipulation_tabs import handle_data_manipulation_tab, handle_preprocessing_tab
+from .tabs.manipulation_tabs import (
+    handle_data_manipulation_tab, 
+    handle_preprocessing_tab,
+    handle_merge_datasets_tab,
+)
 
 from models import get_db, Dataset, DatasetVersion, DatasetAction  # Import the models
 from sqlalchemy.orm import Session
@@ -138,8 +142,17 @@ def main():
                 st.session_state.filtered_data = st.session_state.original_data.copy()
 
         # Tabs for different views (e.g., Data View, Analysis, etc.)
-        tabs = st.tabs(["Summary", "Data Quality", "Analysis", "Data Manipulation", "Preprocessing", "Machine Learning"])
-
+        tabs = st.tabs(
+            [
+                "Summary", 
+                "Data Quality", 
+                "Analysis", 
+                "Merge Datasets",
+                "Data Manipulation", 
+                "Preprocessing", 
+                "Machine Learning", 
+            ]
+        )
         with tabs[0]:
             handle_data_summary_tab(st.session_state.filtered_data)
 
@@ -150,12 +163,13 @@ def main():
             handle_data_analysis_tab(st.session_state.filtered_data)
 
         with tabs[3]:
-            handle_data_manipulation_tab(st.session_state.filtered_data, selected_version_obj)
+            handle_merge_datasets_tab(st.session_state.filtered_data, selected_version_obj)
         with tabs[4]:
-            handle_preprocessing_tab(st.session_state.filtered_data, selected_version_obj)
+            handle_data_manipulation_tab(st.session_state.filtered_data, selected_version_obj)
         with tabs[5]:
+            handle_preprocessing_tab(st.session_state.filtered_data, selected_version_obj)
+        with tabs[6]:
             handle_ml_tab(st.session_state.filtered_data)
-
 
         st.write(f"Displaying first {data_limit} rows of {dataset_name}")
         st.dataframe(st.session_state.filtered_data, use_container_width=True)

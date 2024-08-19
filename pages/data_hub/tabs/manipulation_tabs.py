@@ -3,11 +3,13 @@ import streamlit as st
 
 import pandas as pd
 
-from models import get_db, DatasetAction  # Import the Dataset model and database session
+from models import get_db, DatasetAction, Dataset, DatasetVersion  # Import the Dataset model and database session
 from sqlalchemy.orm import Session
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
 from scipy.stats import zscore
+
+from data_utils import load_data, apply_actions_to_dataset
 
 def log_action(version_id, action_type, parameters):
     """Logs the action to the database."""
@@ -215,3 +217,121 @@ def handle_preprocessing_tab(filtered_data, selected_version):
             log_action(selected_version.id, "Remove Outliers", {"column": selected_column, "method": method})
 
     st.session_state.original_data = filtered_data
+
+def handle_merge_datasets_tab(current_dataset, orignal_version):
+    st.header("Merge Datasets")
+
+    # Fetch datasets from the database
+    db: Session = next(get_db())
+    datasets = db.query(Dataset).all()
+
+    if not datasets:
+        st.write("No datasets available. Please upload a dataset first.")
+        return
+
+    dataset_names = [dataset.name for dataset in datasets]
+
+    # Dropdown to select one additional dataset for merging with the active dataset
+    dataset_selection = st.selectbox("Select Dataset to Merge With", dataset_names)
+
+    if not dataset_selection:
+        st.warning("Please select a dataset to merge.")
+        return
+
+    selected_dataset = db.query(Dataset).filter(Dataset.name == dataset_selection).first()
+    versions = db.query(DatasetVersion).filter(DatasetVersion.dataset_id == selected_dataset.id).all()
+    version_names = [version.version_number for version in versions]
+    selected_version_name = st.selectbox(f"Select Version for {dataset_selection}", version_names)
+
+    # Load the active dataset columns
+    active_columns = st.session_state.original_data.columns
+
+    # Load the dataset for the selected version
+    selected_version = db.query(DatasetVersion).filter(
+        DatasetVersion.dataset_id == selected_dataset.id,
+        DatasetVersion.version_number == selected_version_name
+    ).first()
+    selected_data = load_data(selected_version.dataset.filepath)
+
+    # Apply actions recorded for the selected version
+    actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version.id).all()
+    if actions:
+        selected_data = apply_actions_to_dataset(selected_data, actions)
+
+    selected_columns = selected_data.columns
+
+    # Find common columns for merging
+    common_columns = list(set(active_columns).intersection(set(selected_columns)))
+
+    if not common_columns:
+        st.warning("No common columns available for merging.")
+        return
+
+    # Select join type
+    join_type = st.selectbox("Select Join Type", ["inner", "left", "right", "outer"])
+
+    # Dropdown to select the column to merge on
+    merge_column = st.selectbox("Select the column to merge on", options=common_columns)
+
+    # Preview button
+    if merge_column and st.button("Preview Merged Dataset"):
+        st.session_state.merged_data = merge_datasets(
+            current_dataset,
+            selected_dataset.id,
+            selected_version_name,
+            merge_column,
+            join_type
+        )
+        if st.session_state.merged_data is not None:
+            st.write("Merged Dataset Preview")
+            st.dataframe(st.session_state.merged_data)
+
+    # Merge button
+    if "merged_data" in st.session_state and st.session_state.merged_data is not None:
+        if st.button("Merge"):
+            # Log the merge action
+            log_action(orignal_version.id, "Merge Datasets", {
+                "merge_with": selected_dataset.id,
+                "merge_version": selected_version.id,
+                "join_column": merge_column,
+                "join_type": join_type
+            })
+
+            st.success(f"Merged dataset updated in the current version '{selected_version.version_number}'.")
+
+def merge_datasets(active_data, dataset_id, version_name, merge_column, join_type):
+    db: Session = next(get_db())
+
+    # Fetch the correct version of the dataset
+    selected_version = db.query(DatasetVersion).filter(
+        DatasetVersion.version_number == version_name,
+        DatasetVersion.dataset_id == dataset_id  # Ensure the correct dataset is selected
+    ).first()
+
+    # Load the dataset for the selected version
+    data_path = selected_version.dataset.filepath
+    data = load_data(data_path)  # Load the raw data
+
+    # Apply actions recorded for the selected version
+    actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version.id).all()
+
+    if actions:
+        data = apply_actions_to_dataset(data, actions)  # Apply all recorded actions to get the manipulated data
+
+    try:
+        # Perform the merge between the active dataset and the selected dataset version
+        merged_data = pd.merge(active_data, data, on=merge_column, how=join_type)
+    except KeyError as e:
+        error_msg = (
+            f"Merge failed due to missing column: {e.args[0]}.\n"
+            f"Ensure that both datasets have the column '{merge_column}' available.\n"
+            f"Available columns in active dataset: {list(active_data.columns)}\n"
+            f"Available columns in selected dataset: {list(data.columns)}"
+        )
+        st.error(error_msg)
+        return None
+    except Exception as e:
+        st.error(f"An unexpected error occurred during the merge: {str(e)}")
+        return None
+
+    return merged_data
