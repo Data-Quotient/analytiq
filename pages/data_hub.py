@@ -37,7 +37,7 @@ except ModuleNotFoundError as e:
     elif missing_package == "scipy":
         from scipy.stats import zscore
 
-from llm.utils import suggest_models, explain_predictions, suggest_target_column, explain_feature_importance_commentary, explain_insights_commentary, explain_predictions_commentary, generate_leaderboard_commentary
+from llm.utils import suggest_models, explain_predictions, suggest_target_column, explain_feature_importance_commentary, explain_insights_commentary, explain_predictions_commentary, generate_leaderboard_commentary, generate_industry_report
 from machine_learning.model_mapping import MODEL_MAPPING
 
 from llm.utils import get_llm_response
@@ -52,28 +52,17 @@ def handle_ml_tab(filtered_data):
     """Handles all content and logic within the Machine Learning Tab."""
     st.header("Machine Learning Assistant")
 
-    # Initialize session state variables if they don't exist
-    if 'aml' not in st.session_state:
-        st.session_state.aml = None
-    if 'test_data' not in st.session_state:
-        st.session_state.test_data = None
-    if 'predictions' not in st.session_state:
-        st.session_state.predictions = None
-    if 'feature_importance' not in st.session_state:
-        st.session_state.feature_importance = None
-    if 'selected_model_id' not in st.session_state:
-        st.session_state.selected_model_id = None
-    if 'explanation' not in st.session_state:
-        st.session_state.explanation = None
-    if 'actual_values' not in st.session_state:
-        st.session_state.actual_values = None
+    # Initialize session state variables
+    for var in ['aml', 'test_data', 'predictions', 'feature_importance', 'selected_model_id', 'explanation', 'actual_values']:
+        if var not in st.session_state:
+            st.session_state[var] = None
 
     with st.container():
         st.subheader("1. Explain Your Use Case")
         use_case = st.text_area("Describe your use case", placeholder="E.g., I want to predict house prices based on various features.")
 
         st.subheader("2. Select Your Task")
-        task = st.selectbox("What do you want to do?", ["Classification", "Regression", "Clustering", "Anomaly Detection", "Dimensionality Reduction", "Time Series"])
+        task = st.selectbox("What do you want to do?", ["Classification", "Regression"])
 
         st.subheader("3. Get Algorithm Suggestions")
         if st.button("Get Suggestions"):
@@ -95,52 +84,44 @@ def handle_ml_tab(filtered_data):
             default=st.session_state.get('suggested_algorithms', [])
         )
 
-        if task in ["Classification", "Regression", "Time Series"]:
-            st.subheader("5. Get Target Column Suggestion")
-            llm_commentary = None
-            if st.button("Get Suggested Target Column"):
-                try:
-                    llm_commentary = suggest_target_column(
-                        task,
-                        filtered_data.columns,
-                        use_case,
-                        filtered_data.head(),
-                        generate_summary(filtered_data),
-                        detailed_statistics(filtered_data)
-                    )
-                    st.session_state.target_column = llm_commentary
-                    st.success(f"Suggested Target Column: {llm_commentary}")
-                except ValueError as e:
-                    st.error(str(e))
-            
-            st.session_state.target_column = st.selectbox(
-                "Select Target Column",
-                filtered_data.columns
-            )
+        st.subheader("5. Get Target Column Suggestion")
+        if st.button("Get Suggested Target Column"):
+            try:
+                suggested_target = suggest_target_column(
+                    task,
+                    filtered_data.columns,
+                    use_case,
+                    filtered_data.head(),
+                    generate_summary(filtered_data),
+                    detailed_statistics(filtered_data)
+                )
+                st.session_state.target_column = suggested_target
+                st.success(f"Suggested Target Column: {suggested_target}")
+            except ValueError as e:
+                st.error(str(e))
+        
+        st.session_state.target_column = st.selectbox(
+            "Select Target Column",
+            filtered_data.columns
+        )
 
         st.subheader("6. Model Comparison and Training")
         if st.button("Run Selected Models"):
-            if selected_algorithms:
+            if selected_algorithms and 'target_column' in st.session_state:
                 st.info(f"Running the following models: {', '.join(selected_algorithms)}")
-                if 'target_column' in st.session_state:
-                    st.session_state.aml, st.session_state.test_data = run_h2o_automl(filtered_data, st.session_state.target_column, task.lower(), selected_algorithms)
-                else:
-                    st.error("Target column must be selected for this task.")
-                    return
+                st.session_state.aml, st.session_state.test_data = run_h2o_automl(filtered_data, st.session_state.target_column, task.lower(), selected_algorithms)
                 
                 st.write("AutoML completed. Model leaderboard:")
                 leaderboard = st.session_state.aml.leaderboard
                 st.dataframe(leaderboard.as_data_frame().style.highlight_max(axis=0))
                 
-                # Generate and display leaderboard commentary
                 leaderboard_commentary = generate_leaderboard_commentary(use_case, filtered_data.head(), selected_algorithms, leaderboard.as_data_frame())
                 st.markdown("### Leaderboard Commentary")
                 st.markdown(leaderboard_commentary)
-
             else:
-                st.error("Please select at least one algorithm to run.")
+                st.error("Please select at least one algorithm and a target column.")
 
-        # Display tabs for Post-Leaderboard Analysis after running a selected model
+        # Post-Leaderboard Analysis
         if st.session_state.aml is not None:
             leaderboard = st.session_state.aml.leaderboard
             model_ids = leaderboard['model_id'].as_data_frame().values.flatten().tolist()
@@ -159,16 +140,12 @@ def handle_ml_tab(filtered_data):
 
             if st.session_state.predictions is not None:
                 predictions_with_actuals = st.session_state.test_data.cbind(st.session_state.predictions)
-                # Display the tabs for further analysis
-                tabs = st.tabs(["Model Evaluation", "Feature Importance", "Business Insights"])
+                tabs = st.tabs(["Model Evaluation", "Feature Importance", "Business Insights", "Industry Report"])
 
                 with tabs[0]:
                     st.write("### Model Evaluation")
-                    # Merge the predicted outcomes with the actual data
                     st.write("Actual vs Predicted:")
                     st.dataframe(predictions_with_actuals.as_data_frame())
-                    
-                    # Generate and display predictions commentary
                     predictions_commentary = explain_predictions_commentary(predictions_with_actuals.as_data_frame(), st.session_state.actual_values)
                     st.markdown("### Predictions Commentary")
                     st.markdown(predictions_commentary)
@@ -177,17 +154,35 @@ def handle_ml_tab(filtered_data):
                     if st.session_state.feature_importance is not None:
                         st.write("### Feature Importance:")
                         st.dataframe(st.session_state.feature_importance)
-                        
-                        # Generate and display feature importance commentary
                         feature_importance_commentary = explain_feature_importance_commentary(st.session_state.feature_importance)
                         st.markdown("### Feature Importance Commentary")
                         st.markdown(feature_importance_commentary)
 
                 with tabs[2]:
                     st.write("### Business Insights")
-                    # Generate and display overall insights commentary
                     insights_commentary = explain_insights_commentary(predictions_with_actuals.as_data_frame(), st.session_state.feature_importance)
                     st.markdown(insights_commentary)
+
+                with tabs[3]:
+                    st.write("### Industry Report")
+                    industry_report = generate_industry_report(
+                        use_case,
+                        task,
+                        filtered_data,
+                        st.session_state.target_column,
+                        st.session_state.aml,
+                        predictions_with_actuals.as_data_frame(),
+                        st.session_state.feature_importance
+                    )
+                    st.markdown(industry_report)
+
+                    pdf_buffer = generate_pdf_report(industry_report)
+                    st.download_button(
+                        label="Download Report as PDF",
+                        data=pdf_buffer,
+                        file_name="industry_report.pdf",
+                        mime="application/pdf"
+                    )
 
                 if st.button("Download model"):
                     selected_model = h2o.get_model(st.session_state.selected_model_id)

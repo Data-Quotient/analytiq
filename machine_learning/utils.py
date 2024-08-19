@@ -5,6 +5,11 @@ from typing import Dict, Any, List
 from llm.utils import explain_predictions
 import streamlit as st
 import pickle
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_JUSTIFY
+import io
 
 def run_h2o_automl(data: pd.DataFrame, target_column: str, problem_type: str, selected_models: List[str], max_models: int = 20):
     h2o.init()
@@ -41,6 +46,31 @@ def get_explanation():
         st.session_state.actual_values
     )
 
+def generate_pdf_report(report_content):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=72, leftMargin=72,
+                            topMargin=72, bottomMargin=18)
+    story = []
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Justify', alignment=TA_JUSTIFY))
+
+    title = 'Industry Report: ML Analysis Insights'
+    story.append(Paragraph(title, styles['Title']))
+    story.append(Spacer(1, 12))
+
+    for line in report_content.split('\n'):
+        if line.startswith('**') and line.endswith('**'):
+            # It's a header
+            story.append(Paragraph(line.strip('*'), styles['Heading2']))
+        else:
+            # It's a regular paragraph
+            story.append(Paragraph(line, styles['Justify']))
+        story.append(Spacer(1, 12))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 def save_model(model, file_name: str):
     """Save the model using the built-in pickle module."""
     with open(file_name, 'wb') as file:

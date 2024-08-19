@@ -4,6 +4,8 @@ try:
     from typing import List, Dict, Any
     from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
     import streamlit as st
+    import h2o
+
 except ModuleNotFoundError as e:
     import subprocess
     import sys
@@ -86,7 +88,7 @@ def suggest_models(use_case: str, problem_type: str, data_head: pd.DataFrame, su
 
     {', '.join([f'{k} ({v})' for k, v in available_models.items()])}
 
-    Please provide your suggestions as a comma-separated list of model names, without numbering or explanations. For example: "XGBoost, GBM, DeepLearning"
+    Please provide your suggestions as a comma-separated list of model names, without numbering or explanations. For example: " GBM, DeepLearning"
     """
 
     suggestions = get_llm_response(prompt)
@@ -117,48 +119,47 @@ def explain_predictions(predictions_df, problem_type: str, feature_importance: D
             performance_metrics = f"Accuracy: {accuracy:.4f}\nConfusion Matrix:\n{conf_matrix}\nClassification Report:\n{class_report}"
 
     prompt = f"""
-    Analyze the following {problem_type} predictions and provide a comprehensive, insightful explanation:
+    As a senior data scientist, provide a comprehensive analysis of the following {problem_type} model predictions:
 
     Prediction Summary:
     {pred_summary}
     Total Predictions: {total_predictions}
 
-    Sample of predictions:
+    Sample Predictions:
     {predictions_df.head(10).to_string()}
 
-    {'Feature Importance:' + str(feature_importance) if feature_importance else ''}
+    {'Feature Importance:' + str(feature_importance) if feature_importance else 'Feature importance not available.'}
 
     Performance Metrics:
     {performance_metrics}
 
-    Please provide an in-depth analysis of these predictions, including:
-
+    Analysis Instructions:
     1. Model Performance:
-       - Evaluate the overall performance of the model based on the provided metrics.
-       - Identify areas where the model excels and where it might be falling short.
-       - Suggest potential improvements or next steps for model enhancement.
+       - Evaluate overall performance using provided metrics.
+       - Identify strengths and weaknesses.
+       - Suggest specific improvements.
 
-    2. Prediction Patterns and Insights:
-       - Analyze the distribution of predictions and identify any significant patterns or anomalies.
-       - Relate these patterns to potential real-world implications or business scenarios.
-       - Highlight any surprising or counterintuitive findings in the predictions.
+    2. Prediction Patterns:
+       - Analyze prediction distribution and anomalies.
+       - Connect patterns to real-world implications.
+       - Highlight unexpected findings.
 
-    3. Feature Impact Analysis:
-       - Interpret the feature importance in the context of the predictions.
-       - Explain how the most important features are likely influencing the model's decisions.
-       - Suggest potential actions or strategies based on the feature importance.
+    3. Feature Impact:
+       - Interpret feature importance in context.
+       - Explain how top features influence predictions.
+       - Recommend feature-based strategies.
 
-    4. Business Implications and Actionable Insights:
-       - Translate the model's predictions and performance into concrete business implications.
-       - Provide specific, actionable recommendations for decision-makers based on these insights.
-       - Identify any potential risks or limitations in applying these predictions to real-world scenarios.
+    4. Business Implications:
+       - Translate results into concrete business impacts.
+       - Provide actionable recommendations for stakeholders.
+       - Address potential risks in applying predictions.
 
-    5. Future Outlook and Recommendations:
-       - Based on the current model performance and predictions, suggest areas for further investigation or data collection.
-       - Recommend potential use cases or applications for this model in the business context.
-       - Outline next steps for leveraging these predictions to drive business value.
+    5. Future Steps:
+       - Suggest areas for further investigation.
+       - Recommend additional use cases.
+       - Outline steps to maximize business value.
 
-    Provide your explanation in clear, strategic language suitable for business stakeholders, focusing on actionable insights and decision-making support.
+    Deliver your analysis in clear, strategic language suitable for both technical and non-technical stakeholders. Focus on actionable insights and decision support.
     """
     
     explanation = get_llm_response(prompt)
@@ -292,3 +293,53 @@ def explain_insights_commentary(predictions_df, feature_importance_df) -> str:
 
     explanation = get_llm_response(prompt)
     return explanation
+
+def generate_industry_report(use_case, task, data, target_column, aml, predictions, feature_importance):
+    """Generate a comprehensive, jargon-free industry report based on the ML analysis."""
+    
+    # Safely convert to pandas DataFrame if needed
+    def safe_to_pandas(df):
+        if isinstance(df, h2o.H2OFrame):
+            return df.as_data_frame()
+        elif isinstance(df, pd.DataFrame):
+            return df
+        else:
+            return pd.DataFrame(df)  # Attempt to convert unknown types
+
+    leaderboard_df = safe_to_pandas(aml.leaderboard)
+    predictions_df = safe_to_pandas(predictions)
+    feature_importance_df = safe_to_pandas(feature_importance) if feature_importance is not None else None
+
+    prompt = f"""
+    As a seasoned data scientist and business consultant, create a concise, jargon-free industry report based on the following machine learning analysis:
+
+    Use Case: {use_case}
+    Task: {task}
+    Target Variable: {target_column}
+    Dataset Overview:
+    - Rows: {len(data)}
+    - Columns: {len(data.columns)}
+    - Features: {', '.join(data.columns)}
+
+    Model Performance:
+    {leaderboard_df.head().to_string()}
+
+    Top 5 Important Features:
+    {feature_importance_df.head().to_string() if feature_importance_df is not None else "Not available"}
+
+    Prediction Sample:
+    {predictions_df.head().to_string()}
+
+    Instructions:
+    1. Summarize the business problem and its importance.
+    2. Explain the chosen approach and why it's suitable for this use case.
+    3. Present key findings and insights derived from the model.
+    4. Discuss the practical implications of these findings for the industry.
+    5. Provide 3-5 actionable recommendations based on the analysis.
+    6. Suggest next steps or areas for further investigation.
+
+    Your report should be clear, concise, and free of technical jargon. Focus on the business value and practical applications of the insights gained from this analysis.
+    """
+
+    industry_report = get_llm_response(prompt)
+    return industry_report
