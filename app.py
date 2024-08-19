@@ -1,7 +1,8 @@
 # app.py
 
 import streamlit as st
-from pages import data_hub, datasets, dq_rules
+from pages import datasets, dq_rules
+from pages.data_hub import data_hub
 
 # Map page names to their respective functions
 PAGES = {
