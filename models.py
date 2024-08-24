@@ -4,20 +4,9 @@ import sys
 from datetime import datetime
 import json
 
-# Function to install a package if it's not already installed
-def install_package(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# Check and install SQLAlchemy if not installed
-try:
-    from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
-    from sqlalchemy.ext.declarative import declarative_base
-    from sqlalchemy.orm import relationship, sessionmaker
-except ImportError:
-    install_package("SQLAlchemy")
-    from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
-    from sqlalchemy.ext.declarative import declarative_base
-    from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime, JSON
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
 
 # Define the SQLite database
 DATABASE_URL = "sqlite:///./mydatabase.db"

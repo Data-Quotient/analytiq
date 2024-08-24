@@ -105,7 +105,7 @@ def handle_ml_tab(filtered_data):
             if test_data_option == "Upload new test data":
                 test_file = st.file_uploader("Choose a CSV file for testing", type="csv")
                 if test_file is not None:
-                    test_data = pl.read_csv(test_file)
+                    test_data = pl.read_parquet(test_file)
                     st.session_state.test_data = h2o.H2OFrame(test_data)
                     st.session_state.actual_values = test_data[st.session_state.target_column].to_pandas()
 

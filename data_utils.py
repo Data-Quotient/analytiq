@@ -20,7 +20,7 @@ def load_datasets(folder_path):
 # Function to load selected dataset
 def load_data(file_path, limit=None) -> pl.dataframe:
     """Loads data from the selected CSV file and applies a row limit."""
-    data = pl.read_csv(file_path, infer_schema_length=10000)
+    data = pl.read_parquet(file_path)
     if limit:
         data = data.head(limit)
     return data

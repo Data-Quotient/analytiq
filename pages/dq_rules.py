@@ -21,7 +21,7 @@ def main():
         st.subheader(f"Define Rules for {selected_dataset_name}")
         
         # Read the dataset using polars
-        df = pl.read_csv(selected_dataset.filepath)
+        df = pl.read_parquet(selected_dataset.filepath)
         columns = df.columns
 
         rule_type = st.selectbox("Rule Type", ["Range Check", "Null Check", "Uniqueness Check", "Custom Lambda"])
