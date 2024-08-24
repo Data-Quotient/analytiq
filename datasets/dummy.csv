@@ -1,14 +1,6 @@
-ID,Name,Age,Occupation,Salary
-1,John Doe,28,Software Engineer,85000
-2,Jane Smith,34,Data Scientist,90000
-3,John Doe,28,Software Engineer,85000
-4,Emily Davis,40,Product Manager,120000
-6,Jane Smith,34,Data Scientist,90000
-7,Laura Wilson,31,Graphic Designer,70000
-8,Emily Davis,40,Product Manager,120000
-8,Emily Davis,40,Product Manager,120000
-8,Emily Davis,40,Product Manager,120000
-8,Emily Davis,40,Product Manager,120000
-9,Michael Brown,29,Software Engineer,85000
-4,Emily Davis,40,Product Manager,120000
-6,Jane Smith,34,Data Scientist,90000
+Integer,Float,String,Boolean,Date,Missing
+1,1.1,apple,TRUE,2024-08-23,None
+2,2.2,banana,FALSE,2024-08-22,data
+3,3.3,cherry,TRUE,2024-08-21,None
+4,4.4,date,FALSE,2024-08-20,value
+5,5.5,fig,TRUE,2024-08-19,None
