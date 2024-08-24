@@ -1,17 +1,9 @@
 import streamlit as st
+import polars as pl
+import plotly.express as px
 from data_utils import *
 
-# Try to import Plotly and install if not available
-try:
-    import plotly.express as px
-except ModuleNotFoundError:
-    import subprocess
-    import sys
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "plotly"])
-    import plotly.express as px
-
-
-def display_bivariate_analysis(df, x_column, y_column):
+def display_bivariate_analysis(df: pl.DataFrame, x_column: str, y_column: str):
     """Displays bivariate analysis including scatter plots, bar charts, or correlation coefficients."""
     st.write(f"Analyzing the relationship between {x_column} and {y_column}")
     
@@ -22,25 +14,25 @@ def display_bivariate_analysis(df, x_column, y_column):
     st.write(f"Y-axis ({y_column}) Data Type: {y_dtype}")
 
     # Check for missing values
-    if df[x_column].isnull().any() or df[y_column].isnull().any():
+    if df[x_column].is_null().any() or df[y_column].is_null().any():
         st.warning(f"Missing values detected in {x_column} or {y_column}. This might affect the analysis.")
     
     # Visualizations
     st.subheader(f"Visualizations for {x_column} vs {y_column}")
     
     try:
-        if pd.api.types.is_numeric_dtype(df[x_column]) and pd.api.types.is_numeric_dtype(df[y_column]):
+        if pl.datatypes.Float32 in [df[x_column].dtype, df[y_column].dtype] or pl.datatypes.Float64 in [df[x_column].dtype, df[y_column].dtype]:
             st.write("Scatter Plot")
-            scatter_fig = px.scatter(df, x=x_column, y=y_column, title=f'Scatter Plot of {x_column} vs {y_column}')
+            scatter_fig = px.scatter(df.to_pandas(), x=x_column, y=y_column, title=f'Scatter Plot of {x_column} vs {y_column}')
             st.plotly_chart(scatter_fig, use_container_width=True)
             
             st.write("Correlation Coefficient")
-            correlation = df[[x_column, y_column]].corr().iloc[0, 1]
+            correlation = df.select(pl.correlation(x_column, y_column)).to_pandas().iloc[0, 0]
             st.metric(label=f"Correlation between {x_column} and {y_column}", value=f"{correlation:.2f}")
         
-        elif pd.api.types.is_categorical_dtype(df[x_column]) or pd.api.types.is_categorical_dtype(df[y_column]):
+        elif pl.datatypes.Utf8 in [df[x_column].dtype, df[y_column].dtype]:
             st.write("Bar Chart")
-            bar_fig = px.bar(df, x=x_column, y=y_column, title=f'Bar Chart of {x_column} vs {y_column}', color=x_column)
+            bar_fig = px.bar(df.to_pandas(), x=x_column, y=y_column, title=f'Bar Chart of {x_column} vs {y_column}', color=x_column)
             st.plotly_chart(bar_fig, use_container_width=True)
         
         else:
@@ -49,10 +41,13 @@ def display_bivariate_analysis(df, x_column, y_column):
     except Exception as e:
         st.error(f"An error occurred while generating the visualization: {e}")
 
-def display_multivariate_analysis(df, selected_columns):
+def display_multivariate_analysis(df: pl.DataFrame, selected_columns: list):
     """Displays multivariate analysis including pair plots, heatmaps, or 3D scatter plots."""
     st.write(f"Analyzing relationships between: {', '.join(selected_columns)}")
     
+    # Convert to pandas for plotting
+    pandas_df = df.select(selected_columns).to_pandas()
+
     # Visualizations
     st.subheader("Visualizations")
     
@@ -60,20 +55,20 @@ def display_multivariate_analysis(df, selected_columns):
         # Pair Plot
         if len(selected_columns) > 1:
             st.write("Pair Plot")
-            pair_plot_fig = px.scatter_matrix(df[selected_columns], title="Pair Plot")
+            pair_plot_fig = px.scatter_matrix(pandas_df, dimensions=selected_columns, title="Pair Plot")
             st.plotly_chart(pair_plot_fig, use_container_width=True)
         
         # Heatmap
         if len(selected_columns) > 1:
             st.write("Heatmap")
-            corr_matrix = df[selected_columns].corr()
+            corr_matrix = pandas_df.corr()
             heatmap_fig = px.imshow(corr_matrix, text_auto=True, title="Correlation Heatmap")
             st.plotly_chart(heatmap_fig, use_container_width=True)
         
         # 3D Scatter Plot (only if 3 columns are selected)
-        if len(selected_columns) == 3 and all(pd.api.types.is_numeric_dtype(df[col]) for col in selected_columns):
+        if len(selected_columns) == 3 and all(pandas_df[col].dtype in [float, int] for col in selected_columns):
             st.write("3D Scatter Plot")
-            scatter_3d_fig = px.scatter_3d(df, x=selected_columns[0], y=selected_columns[1], z=selected_columns[2], title="3D Scatter Plot")
+            scatter_3d_fig = px.scatter_3d(pandas_df, x=selected_columns[0], y=selected_columns[1], z=selected_columns[2], title="3D Scatter Plot")
             st.plotly_chart(scatter_3d_fig, use_container_width=True)
         
         if len(selected_columns) > 3:
@@ -82,7 +77,7 @@ def display_multivariate_analysis(df, selected_columns):
     except Exception as e:
         st.error(f"An error occurred while generating the visualization: {e}")
 
-def display_univariate_analysis(df, column):
+def display_univariate_analysis(df: pl.DataFrame, column: str):
     """Displays univariate analysis including distribution plots and summary statistics."""
     st.write(f"Analyzing {column}")
     
@@ -97,7 +92,7 @@ def display_univariate_analysis(df, column):
     col2.metric("Unique Values", summary['Unique Values'])
     col3.metric("Missing Values", summary['Missing Values'])
     
-    if pd.api.types.is_numeric_dtype(df[column]):
+    if pl.datatypes.Float32 in [df[column].dtype, pl.datatypes.Float64] or pl.datatypes.Int8 in [df[column].dtype, pl.datatypes.Int16, pl.datatypes.Int32, pl.datatypes.Int64]:
         col4.metric("Mean", summary['Mean'] if summary['Mean'] is not None else "N/A")
         col5.metric("Median", summary['Median'] if summary['Median'] is not None else "N/A")
         col6.metric("Mode", summary['Mode'] if summary['Mode'] is not None else "N/A")
@@ -112,7 +107,7 @@ def display_univariate_analysis(df, column):
     # Display visualizations
     st.subheader(f"Visualizations for {column}")
     
-    if pd.api.types.is_numeric_dtype(df[column]):
+    if pl.datatypes.Float32 in [df[column].dtype, pl.datatypes.Float64] or pl.datatypes.Int8 in [df[column].dtype, pl.datatypes.Int16, pl.datatypes.Int32, pl.datatypes.Int64]:
         col1, col2 = st.columns(2)
         with col1:
             st.write("Histogram")
@@ -130,26 +125,28 @@ def display_univariate_analysis(df, column):
     
     else:
         st.write("Bar Plot")
-        value_counts_df = df[column].value_counts().reset_index()
-        value_counts_df.columns = [column, 'count']  # Rename columns for clarity
+        value_counts_df = df.group_by(column).agg(pl.count())
         bar_fig = px.bar(value_counts_df, x=column, y='count', title=f'Bar Plot of {column}')
         st.plotly_chart(bar_fig, use_container_width=True)
 
-def display_correlation_analysis(df):
+def display_correlation_analysis(df: pl.DataFrame):
     """Displays correlation analysis including a correlation matrix and heatmap."""
     st.write("Analyzing correlations between numerical variables")
 
     # Select only numeric columns for correlation analysis
-    numeric_df = df.select_dtypes(include=['number'])
+    numeric_df = df.select(pl.col(pl.Float32) | pl.col(pl.Float64) | pl.col(pl.Int8) | pl.col(pl.Int16) | pl.col(pl.Int32) | pl.col(pl.Int64))
     
-    if numeric_df.empty:
+    if numeric_df.is_empty():
         st.warning("No numeric columns available for correlation analysis.")
         return
+
+    # Convert to pandas for plotting
+    pandas_numeric_df = numeric_df.to_pandas()
 
     # Display the correlation matrix in an accordion
     with st.expander("Correlation Matrix", expanded=True):
         st.subheader("Correlation Matrix")
-        corr_matrix = numeric_df.corr()
+        corr_matrix = pandas_numeric_df.corr()
         st.dataframe(corr_matrix)
 
         # Debugging: Display the correlation matrix to ensure it has data

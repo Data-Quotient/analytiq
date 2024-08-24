@@ -1,9 +1,8 @@
 import json
 import streamlit as st
+import polars as pl
 
-import pandas as pd
-
-from models import get_db, DatasetAction, Dataset, DatasetVersion  # Import the Dataset model and database session
+from models import get_db, DatasetAction, Dataset, DatasetVersion
 from sqlalchemy.orm import Session
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
@@ -30,10 +29,10 @@ def log_action(version_id, action_type, parameters):
     st.rerun()
 
 # Function to handle the Data Manipulation Tab
-def handle_data_manipulation_tab(filtered_data, selected_version):
+def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
     """Handles all content and logic within the Data Manipulation Tab."""
     st.header("Data Manipulation")
-    
+
     # Dropdown to select a manipulation action
     action = st.selectbox(
         "Select an Action",
@@ -54,7 +53,7 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
         selected_column = st.selectbox("Select Column to Rename", filtered_data.columns)
         new_column_name = st.text_input("Enter New Column Name")
         if st.button("Rename Column"):
-            filtered_data.rename(columns={selected_column: new_column_name}, inplace=True)
+            filtered_data = filtered_data.rename({selected_column: new_column_name})
             st.write(f"Renamed column {selected_column} to {new_column_name}")
             log_action(selected_version.id, "Rename Column", {"old_name": selected_column, "new_name": new_column_name})
 
@@ -64,13 +63,21 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
         if st.button("Change Data Type"):
             try:
                 if new_data_type == "int":
-                    filtered_data[selected_column] = filtered_data[selected_column].astype(int)
+                    filtered_data = filtered_data.with_columns([
+                        pl.col(selected_column).cast(pl.Int64)
+                    ])
                 elif new_data_type == "float":
-                    filtered_data[selected_column] = filtered_data[selected_column].astype(float)
+                    filtered_data = filtered_data.with_columns([
+                        pl.col(selected_column).cast(pl.Float64)
+                    ])
                 elif new_data_type == "str":
-                    filtered_data[selected_column] = filtered_data[selected_column].astype(str)
+                    filtered_data = filtered_data.with_columns([
+                        pl.col(selected_column).cast(pl.Utf8)
+                    ])
                 elif new_data_type == "bool":
-                    filtered_data[selected_column] = filtered_data[selected_column].astype(bool)
+                    filtered_data = filtered_data.with_columns([
+                        pl.col(selected_column).cast(pl.Boolean)
+                    ])
                 st.write(f"Changed data type of column {selected_column} to {new_data_type}")
                 log_action(selected_version.id, "Change Data Type", {"column": selected_column, "new_type": new_data_type})
             except ValueError as e:
@@ -80,7 +87,7 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
     elif action == "Delete Column":
         selected_columns = st.multiselect("Select Columns to Delete", filtered_data.columns)
         if st.button("Delete Columns"):
-            filtered_data.drop(columns=selected_columns, inplace=True)
+            filtered_data = filtered_data.drop(selected_columns)
             st.write(f"Deleted columns: {', '.join(selected_columns)}")
             log_action(selected_version.id, "Delete Column", {"columns": selected_columns})
 
@@ -88,7 +95,7 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
         filter_condition = st.text_input("Enter Filter Condition (e.g., `age >= 18`)")
         if st.button("Apply Filter"):
             try:
-                filtered_data.query(filter_condition, inplace=True)
+                filtered_data = filtered_data.filter(pl.col(filter_condition))
                 st.write(f"Applied filter: {filter_condition}")
                 log_action(selected_version.id, "Filter Rows", {"condition": filter_condition})
             except Exception as e:
@@ -98,7 +105,9 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
         formula = st.text_input("Enter Formula (e.g., `quantity * price`)")
         if st.button("Add Calculated Column"):
             try:
-                filtered_data[new_column_name] = eval(formula, {'__builtins__': None}, filtered_data)
+                filtered_data = filtered_data.with_columns([
+                    pl.eval(pl.col(formula)).alias(new_column_name)
+                ])
                 st.write(f"Added calculated column {new_column_name} with formula: {formula}")
                 log_action(selected_version.id, "Add Calculated Column", {"new_column": new_column_name, "formula": formula})
             except Exception as e:
@@ -109,30 +118,35 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
         fill_value = st.text_input("Enter Value (if 'Specific Value' selected)")
         if st.button("Fill Missing Values"):
             if fill_method == "Specific Value":
-                filtered_data[selected_column].fillna(fill_value, inplace=True)
+                filtered_data = filtered_data.fill_none(fill_value)
                 log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method, "value": fill_value})
             elif fill_method == "Mean":
-                filtered_data[selected_column].fillna(filtered_data[selected_column].mean(), inplace=True)
+                mean_value = filtered_data[pl.col(selected_column)].mean()
+                filtered_data = filtered_data.fill_none(mean_value)
                 log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method})
             elif fill_method == "Median":
-                filtered_data[selected_column].fillna(filtered_data[selected_column].median(), inplace=True)
+                median_value = filtered_data[pl.col(selected_column)].median()
+                filtered_data = filtered_data.fill_none(median_value)
                 log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method})
             elif fill_method == "Mode":
-                filtered_data[selected_column].fillna(filtered_data[selected_column].mode()[0], inplace=True)
+                mode_value = filtered_data[pl.col(selected_column)].mode()[0]
+                filtered_data = filtered_data.fill_none(mode_value)
                 log_action(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method})
             st.write(f"Filled missing values in column {selected_column} using method: {fill_method}")
 
     elif action == "Duplicate Column":
         selected_column = st.selectbox("Select Column to Duplicate", filtered_data.columns)
         if st.button("Duplicate Column"):
-            filtered_data[f"{selected_column}_duplicate"] = filtered_data[selected_column]
+            filtered_data = filtered_data.with_columns([
+                pl.col(selected_column).alias(f"{selected_column}_duplicate")
+            ])
             st.write(f"Duplicated column: {selected_column}")
             log_action(selected_version.id, "Duplicate Column", {"column": selected_column})
 
     elif action == "Reorder Columns":
         new_order = st.multiselect("Select Columns in New Order", filtered_data.columns, default=list(filtered_data.columns))
         if st.button("Reorder Columns"):
-            filtered_data = filtered_data[new_order]
+            filtered_data = filtered_data.select(new_order)
             st.write(f"Reordered columns to: {', '.join(new_order)}")
             log_action(selected_version.id, "Reorder Columns", {"new_order": new_order})
     elif action == "Replace Values":
@@ -140,14 +154,16 @@ def handle_data_manipulation_tab(filtered_data, selected_version):
         to_replace = st.text_input("Value to Replace")
         replace_with = st.text_input("Replace With")
         if st.button("Replace Values"):
-            filtered_data[selected_column].replace(to_replace, replace_with, inplace=True)
+            filtered_data = filtered_data.with_columns([
+                pl.col(selected_column).replace(to_replace, replace_with)
+            ])
             st.write(f"Replaced {to_replace} with {replace_with} in column {selected_column}")
             log_action(selected_version.id, "Replace Values", {"column": selected_column, "to_replace": to_replace, "replace_with": replace_with})
 
     st.session_state.original_data = filtered_data
 
 # Function to handle the Preprocessing Tab
-def handle_preprocessing_tab(filtered_data, selected_version):
+def handle_preprocessing_tab(filtered_data: pl.DataFrame, selected_version):
     """Handles all content and logic within the Preprocessing Tab."""
     st.header("Data Preprocessing")
 
@@ -166,8 +182,15 @@ def handle_preprocessing_tab(filtered_data, selected_version):
         selected_columns = st.multiselect("Select Columns to Scale", filtered_data.columns)
         scaling_method = st.selectbox("Select Scaling Method", ["StandardScaler", "MinMaxScaler"])
         if st.button("Scale Data"):
-            scaler = StandardScaler() if scaling_method == "StandardScaler" else MinMaxScaler()
-            filtered_data[selected_columns] = scaler.fit_transform(filtered_data[selected_columns])
+            if scaling_method == "StandardScaler":
+                scaler = StandardScaler()
+            else:
+                scaler = MinMaxScaler()
+
+            # Convert to pandas DataFrame for scaling
+            filtered_data_pd = filtered_data.to_pandas()
+            filtered_data_pd[selected_columns] = scaler.fit_transform(filtered_data_pd[selected_columns])
+            filtered_data = pl.from_pandas(filtered_data_pd)
             st.write(f"Scaled columns: {', '.join(selected_columns)} using {scaling_method}")
             log_action(selected_version.id, "Scale Data", {"columns": selected_columns, "method": scaling_method})
 
@@ -176,15 +199,15 @@ def handle_preprocessing_tab(filtered_data, selected_version):
         encoding_type = st.selectbox("Select Encoding Type", ["OneHotEncoding", "LabelEncoding"])
         if st.button("Encode Data"):
             if encoding_type == "OneHotEncoding":
-                encoder = OneHotEncoder(sparse_output=False, drop='first')  # Updated to use sparse_output
-                encoded_data = encoder.fit_transform(filtered_data[selected_columns])
-                encoded_df = pd.DataFrame(encoded_data, columns=encoder.get_feature_names_out(selected_columns))
-                filtered_data.drop(columns=selected_columns, inplace=True)
-                filtered_data = pd.concat([filtered_data, encoded_df], axis=1)
+                filtered_data = filtered_data.to_pandas()
+                for col in selected_columns:
+                    filtered_data = pd.get_dummies(filtered_data, columns=[col], drop_first=True)
+                filtered_data = pl.from_pandas(filtered_data)
             else:
                 encoder = LabelEncoder()
-                for col in selected_columns:
-                    filtered_data[col] = encoder.fit_transform(filtered_data[col])
+                filtered_data = filtered_data.with_columns([
+                    pl.col(col).apply(lambda x: encoder.fit_transform(x), return_dtype=pl.Int64).alias(col) for col in selected_columns
+                ])
             st.write(f"Encoded columns: {', '.join(selected_columns)} using {encoding_type}")
             log_action(selected_version.id, "Encode Data", {"columns": selected_columns, "type": encoding_type})
 
@@ -194,11 +217,20 @@ def handle_preprocessing_tab(filtered_data, selected_version):
         if st.button("Impute Missing Values"):
             for col in selected_columns:
                 if impute_method == "Mean":
-                    filtered_data[col].fillna(filtered_data[col].mean(), inplace=True)
+                    mean_value = filtered_data[col].mean()
+                    filtered_data = filtered_data.with_columns([
+                        pl.col(col).fill_none(mean_value)
+                    ])
                 elif impute_method == "Median":
-                    filtered_data[col].fillna(filtered_data[col].median(), inplace=True)
+                    median_value = filtered_data[col].median()
+                    filtered_data = filtered_data.with_columns([
+                        pl.col(col).fill_none(median_value)
+                    ])
                 elif impute_method == "Mode":
-                    filtered_data[col].fillna(filtered_data[col].mode()[0], inplace=True)
+                    mode_value = filtered_data[col].mode()[0]
+                    filtered_data = filtered_data.with_columns([
+                        pl.col(col).fill_none(mode_value)
+                    ])
             st.write(f"Imputed missing values in columns: {', '.join(selected_columns)} using {impute_method}")
             log_action(selected_version.id, "Impute Missing Values", {"columns": selected_columns, "method": impute_method})
 
@@ -210,15 +242,18 @@ def handle_preprocessing_tab(filtered_data, selected_version):
                 Q1 = filtered_data[selected_column].quantile(0.25)
                 Q3 = filtered_data[selected_column].quantile(0.75)
                 IQR = Q3 - Q1
-                filtered_data = filtered_data[~((filtered_data[selected_column] < (Q1 - 1.5 * IQR)) | (filtered_data[selected_column] > (Q3 + 1.5 * IQR)))]
+                filtered_data = filtered_data.filter(
+                    (pl.col(selected_column) >= (Q1 - 1.5 * IQR)) & (pl.col(selected_column) <= (Q3 + 1.5 * IQR))
+                )
             elif method == "Z-Score Method":
-                filtered_data = filtered_data[(zscore(filtered_data[selected_column]).abs() < 3)]
+                z_scores = zscore(filtered_data[selected_column].to_pandas())
+                filtered_data = filtered_data.filter(pl.Series(z_scores).abs() < 3)
             st.write(f"Removed outliers from column {selected_column} using {method}")
             log_action(selected_version.id, "Remove Outliers", {"column": selected_column, "method": method})
 
     st.session_state.original_data = filtered_data
 
-def handle_merge_datasets_tab(current_dataset, orignal_version):
+def handle_merge_datasets_tab(current_dataset: pl.DataFrame, orignal_version):
     st.header("Merge Datasets")
 
     # Fetch datasets from the database
@@ -284,7 +319,7 @@ def handle_merge_datasets_tab(current_dataset, orignal_version):
         )
         if st.session_state.merged_data is not None:
             st.write("Merged Dataset Preview")
-            st.dataframe(st.session_state.merged_data)
+            st.dataframe(st.session_state.merged_data.to_pandas())
 
     # Merge button
     if "merged_data" in st.session_state and st.session_state.merged_data is not None:
@@ -299,13 +334,13 @@ def handle_merge_datasets_tab(current_dataset, orignal_version):
 
             st.success(f"Merged dataset updated in the current version '{selected_version.version_number}'.")
 
-def merge_datasets(active_data, dataset_id, version_name, merge_column, join_type):
+def merge_datasets(active_data: pl.DataFrame, dataset_id, version_name, merge_column, join_type):
     db: Session = next(get_db())
 
     # Fetch the correct version of the dataset
     selected_version = db.query(DatasetVersion).filter(
         DatasetVersion.version_number == version_name,
-        DatasetVersion.dataset_id == dataset_id  # Ensure the correct dataset is selected
+        DatasetVersion.dataset_id == dataset_id
     ).first()
 
     # Load the dataset for the selected version
@@ -316,11 +351,11 @@ def merge_datasets(active_data, dataset_id, version_name, merge_column, join_typ
     actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version.id).all()
 
     if actions:
-        data = apply_actions_to_dataset(data, actions)  # Apply all recorded actions to get the manipulated data
+        data = apply_actions_to_dataset(data, actions)
 
     try:
         # Perform the merge between the active dataset and the selected dataset version
-        merged_data = pd.merge(active_data, data, on=merge_column, how=join_type)
+        merged_data = active_data.join(data, on=merge_column, how=join_type)
     except KeyError as e:
         error_msg = (
             f"Merge failed due to missing column: {e.args[0]}.\n"

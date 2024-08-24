@@ -1,39 +1,15 @@
-import pandas as pd
+import polars as pl
 import os
 import json
+import plotly.express as px
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
+from scipy.stats import zscore
 
-# Try to import necessary packages and install if not available
-# Try to import necessary packages and install if not available
-try:
-    import plotly.express as px
-    from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
-    from scipy.stats import zscore
-    from sklearn import __version__ as sklearn_version
-
-except ModuleNotFoundError as e:
-    import subprocess
-    import sys
-    missing_package = str(e).split("'")[1]  # Get the missing package name
-    
-    # Correctly handle the sklearn package by installing scikit-learn
-    if missing_package == 'sklearn':
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn"])
-    elif missing_package == 'plotly':
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "plotly"])
-    elif missing_package == 'scipy':
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "scipy"])
-    
-    # Reimport after installation
-    if missing_package == "plotly":
-        import plotly.express as px
-    elif missing_package == "sklearn":
-        from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
-    elif missing_package == "scipy":
-        from scipy.stats import zscore
-
-    from sklearn import __version__ as sklearn_version
-
-
+NUMERIC_TYPES = [
+    pl.Int8, pl.Int16, pl.Int32, pl.Int64, 
+    pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64, 
+    pl.Float32, pl.Float64
+]
 
 # Function to load datasets
 def load_datasets(folder_path):
@@ -42,9 +18,9 @@ def load_datasets(folder_path):
     return files
 
 # Function to load selected dataset
-def load_data(file_path, limit=None):
+def load_data(file_path, limit=None) -> pl.dataframe:
     """Loads data from the selected CSV file and applies a row limit."""
-    data = pd.read_csv(file_path)
+    data = pl.read_csv(file_path, infer_schema_length=10000)
     if limit:
         data = data.head(limit)
     return data
@@ -54,42 +30,43 @@ def apply_filters(df, filters):
     """Applies the user-selected filters to the DataFrame."""
     for col, val in filters.items():
         if val:
-            df = df[df[col] == val]
+            df = df.filter(pl.col(col) == val)
     return df
 
 # Function to generate a summary of the dataset
-def generate_summary(df):
+def generate_summary(df: pl.DataFrame):
     """Generates a summary of the DataFrame."""
     summary = {
         'Number of Rows': len(df),
         'Number of Columns': len(df.columns),
-        'Missing Values': df.isnull().sum().sum(),
-        'Duplicate Rows': df.duplicated().sum(),
-        'Memory Usage (MB)': round(df.memory_usage(deep=True).sum() / (1024**2), 2)
+        'Missing Values': df.null_count().to_pandas().sum().sum(),
+        'Duplicate Rows': int(df.is_duplicated().sum()/2),
+        'Memory Usage (MB)': round(df.estimated_size()/ (1024**2), 2)
     }
     return summary
 
 # Function to display detailed statistics for each column
 def detailed_statistics(df):
     """Displays detailed statistics for each column."""
-    return df.describe(include='all')
+    return df.describe()
 
 # Function to generate a column-level summary
 def column_summary(df, col):
     """Generates a detailed summary for a single column."""
+    column = df[col]
+    dtype = column.dtype
     summary = {
-        'Data Type': df[col].dtype,
-        'Unique Values': df[col].nunique(),
-        'Missing Values': df[col].isnull().sum(),
-        'Mean': df[col].mean() if pd.api.types.is_numeric_dtype(df[col]) else 'N/A',
-        'Median': df[col].median() if pd.api.types.is_numeric_dtype(df[col]) else 'N/A',
-        'Mode': df[col].mode().iloc[0] if not df[col].mode().empty else 'N/A',
-        'Standard Deviation': df[col].std() if pd.api.types.is_numeric_dtype(df[col]) else 'N/A',
-        'Min': df[col].min() if pd.api.types.is_numeric_dtype(df[col]) else 'N/A',
-        'Max': df[col].max() if pd.api.types.is_numeric_dtype(df[col]) else 'N/A',
+        'Data Type': dtype,
+        'Unique Values': column.n_unique(),
+        'Missing Values': column.is_null().sum(),
+        'Mean': column.mean() if dtype in NUMERIC_TYPES else 'N/A',
+        'Median': column.median() if dtype in NUMERIC_TYPES else 'N/A',
+        'Mode': column.mode()[0] if dtype in NUMERIC_TYPES else 'N/A',
+        'Standard Deviation': column.std() if dtype in NUMERIC_TYPES else 'N/A',
+        'Min': column.min() if dtype in NUMERIC_TYPES else 'N/A',
+        'Max': column.max() if dtype in NUMERIC_TYPES else 'N/A',
     }
     return summary
-
 
 def apply_dq_rules(df, rules):
     violations = []
@@ -106,9 +83,9 @@ def apply_dq_rules(df, rules):
             if rule.rule_type == "Range Check":
                 condition = lambda x: eval(rule.condition)
             elif rule.rule_type == "Null Check":
-                condition = lambda x: pd.notnull(x)
+                condition = lambda x: x.is_not_null()
             elif rule.rule_type == "Uniqueness Check":
-                condition = lambda x: df[target_column].is_unique
+                condition = lambda x: x.is_unique
             elif rule.rule_type == "Custom Lambda":
                 condition = eval(rule.condition)  # Custom Lambda provided by the user
 
@@ -137,8 +114,6 @@ def apply_dq_rules(df, rules):
     
     return violations
 
-
-
 def apply_actions_to_dataset(dataset, actions):
     """
     Apply a list of actions to a dataset.
@@ -155,77 +130,82 @@ def apply_actions_to_dataset(dataset, actions):
         parameters = json.loads(action.parameters)  # Decode JSON string to dictionary
         
         if action_type == "Rename Column":
-            dataset.rename(columns={parameters["old_name"]: parameters["new_name"]}, inplace=True)
+            dataset = dataset.rename({parameters["old_name"]: parameters["new_name"]})
         
         elif action_type == "Change Data Type":
-            dataset[parameters["column"]] = dataset[parameters["column"]].astype(parameters["new_type"])
+            dataset = dataset.with_column(pl.col(parameters["column"]).cast(parameters["new_type"]))
         
         elif action_type == "Delete Column":
-            dataset.drop(columns=parameters["columns"], inplace=True)
+            dataset = dataset.drop(parameters["columns"])
         
         elif action_type == "Filter Rows":
-            dataset = dataset.query(parameters["condition"])
+            dataset = dataset.filter(pl.col(parameters["condition"]))
         
         elif action_type == "Add Calculated Column":
-            dataset[parameters["new_column"]] = eval(parameters["formula"], {'__builtins__': None}, dataset)
+            dataset = dataset.with_column(pl.eval(parameters["formula"]).alias(parameters["new_column"]))
         
         elif action_type == "Fill Missing Values":
             if parameters["method"] == "Specific Value":
-                dataset[parameters["column"]].fillna(parameters["value"], inplace=True)
+                dataset = dataset.fill_null(pl.lit(parameters["value"]))
             elif parameters["method"] == "Mean":
-                dataset[parameters["column"]].fillna(dataset[parameters["column"]].mean(), inplace=True)
+                mean = dataset[parameters["column"]].mean()
+                dataset = dataset.fill_null(mean)
             elif parameters["method"] == "Median":
-                dataset[parameters["column"]].fillna(dataset[parameters["column"]].median(), inplace=True)
+                median = dataset[parameters["column"]].median()
+                dataset = dataset.fill_null(median)
             elif parameters["method"] == "Mode":
-                dataset[parameters["column"]].fillna(dataset[parameters["column"]].mode()[0], inplace=True)
+                mode = dataset[parameters["column"]].mode()[0]
+                dataset = dataset.fill_null(mode)
         
         elif action_type == "Duplicate Column":
-            dataset[f"{parameters['column']}_duplicate"] = dataset[parameters["column"]]
+            dataset = dataset.with_column(dataset[parameters["column"]].alias(f"{parameters['column']}_duplicate"))
         
         elif action_type == "Reorder Columns":
-            dataset = dataset[parameters["new_order"]]
+            dataset = dataset.select(parameters["new_order"])
         
         elif action_type == "Replace Values":
-            dataset[parameters["column"]].replace(parameters["to_replace"], parameters["replace_with"], inplace=True)
-
+            dataset = dataset.with_column(pl.col(parameters["column"]).replace(parameters["to_replace"], parameters["replace_with"]))
+        
         # Handle Preprocessing Actions
         elif action_type == "Scale Data":
             scaler = StandardScaler() if parameters["method"] == "StandardScaler" else MinMaxScaler()
-            dataset[parameters["columns"]] = scaler.fit_transform(dataset[parameters["columns"]])
+            scaled_data = scaler.fit_transform(dataset[parameters["columns"]])
+            dataset = dataset.with_columns([pl.Series(col, scaled_data[:, idx]) for idx, col in enumerate(parameters["columns"])])
         
         elif action_type == "Encode Data":
             if parameters["type"] == "OneHotEncoding":
-                if sklearn_version >= '1.2':
-                    encoder = OneHotEncoder(sparse_output=False, drop='first')
-                else:
-                    encoder = OneHotEncoder(sparse=False, drop='first')
+                encoder = OneHotEncoder(sparse_output=False, drop='first')
                 encoded_data = encoder.fit_transform(dataset[parameters["columns"]])
-                encoded_df = pd.DataFrame(encoded_data, columns=encoder.get_feature_names_out(parameters["columns"]))
-                dataset.drop(columns=parameters["columns"], inplace=True)
-                dataset = pd.concat([dataset, encoded_df], axis=1)
+                encoded_df = pl.DataFrame(encoded_data, columns=encoder.get_feature_names_out(parameters["columns"]))
+                dataset = dataset.drop(parameters["columns"])
+                dataset = dataset.hstack(encoded_df)
             else:
                 encoder = LabelEncoder()
                 for col in parameters["columns"]:
-                    dataset[col] = encoder.fit_transform(dataset[col])
-
+                    dataset = dataset.with_column(pl.col(col).apply(lambda x: encoder.fit_transform(x)))
+        
         elif action_type == "Impute Missing Values":
             for col in parameters["columns"]:
                 if parameters["method"] == "Mean":
-                    dataset[col].fillna(dataset[col].mean(), inplace=True)
+                    mean = dataset[col].mean()
+                    dataset = dataset.fill_null(pl.lit(mean))
                 elif parameters["method"] == "Median":
-                    dataset[col].fillna(dataset[col].median(), inplace=True)
+                    median = dataset[col].median()
+                    dataset = dataset.fill_null(pl.lit(median))
                 elif parameters["method"] == "Mode":
-                    dataset[col].fillna(dataset[col].mode()[0], inplace=True)
+                    mode = dataset[col].mode()[0]
+                    dataset = dataset.fill_null(pl.lit(mode))
 
         elif action_type == "Remove Outliers":
             if parameters["method"] == "IQR Method":
                 Q1 = dataset[parameters["column"]].quantile(0.25)
                 Q3 = dataset[parameters["column"]].quantile(0.75)
                 IQR = Q3 - Q1
-                dataset = dataset[~((dataset[parameters["column"]] < (Q1 - 1.5 * IQR)) | (dataset[parameters["column"]] > (Q3 + 1.5 * IQR)))]
+                dataset = dataset.filter(~((pl.col(parameters["column"]) < (Q1 - 1.5 * IQR)) | (pl.col(parameters["column"]) > (Q3 + 1.5 * IQR))))
             elif parameters["method"] == "Z-Score Method":
-                dataset = dataset[(zscore(dataset[parameters["column"]]).abs() < 3)]
-
+                z_scores = zscore(dataset[parameters["column"]])
+                dataset = dataset.filter(pl.col(parameters["column"]).apply(lambda x: abs(x) < 3))
+        
         elif action_type == "Merge Datasets":
             from models import get_db, DatasetAction, Dataset, DatasetVersion  # Import the Dataset model and database session
             from sqlalchemy.orm import Session
@@ -252,6 +232,6 @@ def apply_actions_to_dataset(dataset, actions):
                 selected_data = apply_actions_to_dataset(selected_data, actions)
 
             # Perform the merge between the original dataset and the selected merge dataset version
-            dataset = pd.merge(dataset, selected_data, on=merge_column, how=join_type)
+            dataset = dataset.join(selected_data, on=merge_column, how=join_type)
 
     return dataset

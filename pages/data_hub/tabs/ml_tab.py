@@ -1,4 +1,4 @@
-import pandas as pd
+import polars as pl
 import streamlit as st
 
 from data_utils import generate_summary, detailed_statistics
@@ -22,7 +22,6 @@ from machine_learning.utils import (
 )
 
 
-
 def handle_ml_tab(filtered_data):
     """Handles all content and logic within the Machine Learning Tab."""
     st.header("Machine Learning Assistant")
@@ -43,7 +42,7 @@ def handle_ml_tab(filtered_data):
         if st.button("Get Suggestions"):
             if use_case:
                 st.info("Sending your data and use case to the LLM for algorithm suggestions...")
-                suggested_algorithms = suggest_models(use_case, task.lower(), filtered_data.head(), generate_summary(filtered_data), detailed_statistics(filtered_data))
+                suggested_algorithms = suggest_models(use_case, task.lower(), filtered_data.head().to_pandas(), generate_summary(filtered_data.to_pandas()), detailed_statistics(filtered_data.to_pandas()))
                 if suggested_algorithms:
                     st.session_state.suggested_algorithms = suggested_algorithms
                     st.success(f"Suggested Algorithms: {', '.join(suggested_algorithms)}")
@@ -66,9 +65,9 @@ def handle_ml_tab(filtered_data):
                     task,
                     filtered_data.columns,
                     use_case,
-                    filtered_data.head(),
-                    generate_summary(filtered_data),
-                    detailed_statistics(filtered_data)
+                    filtered_data.head().to_pandas(),
+                    generate_summary(filtered_data.to_pandas()),
+                    detailed_statistics(filtered_data.to_pandas())
                 )
                 st.session_state.target_column = suggested_target
                 st.success(f"Suggested Target Column: {suggested_target}")
@@ -90,7 +89,7 @@ def handle_ml_tab(filtered_data):
                 leaderboard = st.session_state.aml.leaderboard
                 st.dataframe(leaderboard.as_data_frame().style.highlight_max(axis=0))
                 
-                leaderboard_commentary = generate_leaderboard_commentary(use_case, filtered_data.head(), selected_algorithms, leaderboard.as_data_frame())
+                leaderboard_commentary = generate_leaderboard_commentary(use_case, filtered_data.head().to_pandas(), selected_algorithms, leaderboard.as_data_frame())
                 st.markdown("### Leaderboard Commentary")
                 st.markdown(leaderboard_commentary)
             else:
@@ -106,9 +105,9 @@ def handle_ml_tab(filtered_data):
             if test_data_option == "Upload new test data":
                 test_file = st.file_uploader("Choose a CSV file for testing", type="csv")
                 if test_file is not None:
-                    test_data = pd.read_csv(test_file)
+                    test_data = pl.read_csv(test_file)
                     st.session_state.test_data = h2o.H2OFrame(test_data)
-                    st.session_state.actual_values = test_data[st.session_state.target_column]
+                    st.session_state.actual_values = test_data[st.session_state.target_column].to_pandas()
 
             if st.button("Run selected model"):
                 run_selected_model()
@@ -120,22 +119,22 @@ def handle_ml_tab(filtered_data):
                 with tabs[0]:
                     st.write("### Model Evaluation")
                     st.write("Actual vs Predicted:")
-                    st.dataframe(predictions_with_actuals.as_data_frame())
-                    predictions_commentary = explain_predictions_commentary(predictions_with_actuals.as_data_frame(), st.session_state.actual_values)
+                    st.dataframe(predictions_with_actuals.to_pandas())
+                    predictions_commentary = explain_predictions_commentary(predictions_with_actuals.to_pandas(), st.session_state.actual_values)
                     st.markdown("### Predictions Commentary")
                     st.markdown(predictions_commentary)
 
                 with tabs[1]:
                     if st.session_state.feature_importance is not None:
                         st.write("### Feature Importance:")
-                        st.dataframe(st.session_state.feature_importance)
-                        feature_importance_commentary = explain_feature_importance_commentary(st.session_state.feature_importance)
+                        st.dataframe(st.session_state.feature_importance.to_pandas())
+                        feature_importance_commentary = explain_feature_importance_commentary(st.session_state.feature_importance.to_pandas())
                         st.markdown("### Feature Importance Commentary")
                         st.markdown(feature_importance_commentary)
 
                 with tabs[2]:
                     st.write("### Business Insights")
-                    insights_commentary = explain_insights_commentary(predictions_with_actuals.as_data_frame(), st.session_state.feature_importance)
+                    insights_commentary = explain_insights_commentary(predictions_with_actuals.to_pandas(), st.session_state.feature_importance.to_pandas())
                     st.markdown(insights_commentary)
 
                 with tabs[3]:
@@ -143,11 +142,11 @@ def handle_ml_tab(filtered_data):
                     industry_report = generate_industry_report(
                         use_case,
                         task,
-                        filtered_data,
+                        filtered_data.to_pandas(),
                         st.session_state.target_column,
                         st.session_state.aml,
-                        predictions_with_actuals.as_data_frame(),
-                        st.session_state.feature_importance
+                        predictions_with_actuals.to_pandas(),
+                        st.session_state.feature_importance.to_pandas()
                     )
                     st.markdown(industry_report)
 

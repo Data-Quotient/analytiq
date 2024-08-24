@@ -1,43 +1,20 @@
-try:
-    from openai import OpenAI
-    import os
-    from typing import List, Dict, Any
-    from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
-    import streamlit as st
-    import h2o
-
-except ModuleNotFoundError as e:
-    import subprocess
-    import sys
-    missing_package = str(e).split("'")[1]  # Get the missing package name
-
-    # Install the missing package
-    subprocess.check_call([sys.executable, "-m", "pip", "install", missing_package])
-
-    # Re-import the module after installation
-    if missing_package == "openai":
-        from openai import OpenAI
-    elif missing_package == "sklearn":
-        from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
-    elif missing_package == "streamlit":
-        import streamlit as st
-
-    from openai import OpenAI
-    import os
-    from typing import List, Dict, Any
-    from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
-    import streamlit as st
-
-import pandas as pd
+import polars as pl
+from typing import List, Dict, Any
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
+import streamlit as st
+import h2o
+from openai import OpenAI
 from machine_learning.model_mapping import MODEL_MAPPING
-
-
-# Load the OpenAI API key from Streamlit secrets
+import io
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_JUSTIFY
 
 def get_llm_response(prompt: str) -> str:
     try:
         # Initialize the OpenAI client
-        client = OpenAI(api_key = st.secrets["openai_api_key"])
+        client = OpenAI(api_key=st.secrets["openai_api_key"])
 
         # Create the chat completion
         completion = client.chat.completions.create(
@@ -55,16 +32,15 @@ def get_llm_response(prompt: str) -> str:
     except Exception as e:
         return f"Error getting LLM explanation: {str(e)}"
 
-    
-def suggest_models(use_case: str, problem_type: str, data_head: pd.DataFrame, summary: dict, detailed_stats: pd.DataFrame) -> List[str]:
+def suggest_models(use_case: str, problem_type: str, data_head: pl.DataFrame, summary: dict, detailed_stats: pl.DataFrame) -> List[str]:
     if problem_type not in MODEL_MAPPING:
         return []
 
     available_models = MODEL_MAPPING[problem_type]
 
     # Convert data head and detailed statistics to string for inclusion in the prompt
-    data_head_str = data_head.to_string(index=False)
-    detailed_stats_str = detailed_stats.to_string(index=False)
+    data_head_str = data_head.head().to_pandas().to_string(index=False)
+    detailed_stats_str = detailed_stats.describe().to_pandas().to_string(index=False)
 
     prompt = f"""
     You are an AI assistant that suggests the most appropriate machine learning models based on the use case, data summary, and statistics provided.
@@ -101,21 +77,21 @@ def suggest_models(use_case: str, problem_type: str, data_head: pd.DataFrame, su
 
     return valid_models
 
-
-def explain_predictions(predictions_df, problem_type: str, feature_importance: Dict[str, Any] = None, actual_values: pd.Series = None) -> str:
-    pred_summary = predictions_df['predict'].describe().to_dict()
+def explain_predictions(predictions_df: pl.DataFrame, problem_type: str, feature_importance: Dict[str, Any] = None, actual_values: pl.Series = None) -> str:
+    pred_summary = predictions_df.select(pl.col('predict').describe()).to_pandas().to_dict()
     total_predictions = len(predictions_df)
     
     performance_metrics = ""
     if actual_values is not None:
+        actual_values_pd = actual_values.to_pandas()
         if problem_type == "regression":
-            mse = mean_squared_error(actual_values, predictions_df['predict'])
-            r2 = r2_score(actual_values, predictions_df['predict'])
+            mse = mean_squared_error(actual_values_pd, predictions_df['predict'].to_pandas())
+            r2 = r2_score(actual_values_pd, predictions_df['predict'].to_pandas())
             performance_metrics = f"Mean Squared Error: {mse:.4f}\nR-squared: {r2:.4f}"
         elif problem_type == "classification":
-            accuracy = accuracy_score(actual_values, predictions_df['predict'])
-            conf_matrix = confusion_matrix(actual_values, predictions_df['predict'])
-            class_report = classification_report(actual_values, predictions_df['predict'])
+            accuracy = accuracy_score(actual_values_pd, predictions_df['predict'].to_pandas())
+            conf_matrix = confusion_matrix(actual_values_pd, predictions_df['predict'].to_pandas())
+            class_report = classification_report(actual_values_pd, predictions_df['predict'].to_pandas())
             performance_metrics = f"Accuracy: {accuracy:.4f}\nConfusion Matrix:\n{conf_matrix}\nClassification Report:\n{class_report}"
 
     prompt = f"""
@@ -126,7 +102,7 @@ def explain_predictions(predictions_df, problem_type: str, feature_importance: D
     Total Predictions: {total_predictions}
 
     Sample Predictions:
-    {predictions_df.head(10).to_string()}
+    {predictions_df.head(10).to_pandas().to_string()}
 
     {'Feature Importance:' + str(feature_importance) if feature_importance else 'Feature importance not available.'}
 
@@ -165,15 +141,15 @@ def explain_predictions(predictions_df, problem_type: str, feature_importance: D
     explanation = get_llm_response(prompt)
     return explanation
 
-def suggest_target_column(task: str, available_columns: pd.Index, use_case: str, data_head: pd.DataFrame, summary: dict, detailed_stats: pd.DataFrame) -> str:
+def suggest_target_column(task: str, available_columns: pl.Series, use_case: str, data_head: pl.DataFrame, summary: dict, detailed_stats: pl.DataFrame) -> str:
     """Suggest the most appropriate target column based on the task, list of available columns, use case, and dataset details."""
     
     # Convert columns list to a string
-    columns_str = ", ".join(available_columns)
+    columns_str = ", ".join(available_columns.to_list())
     
     # Convert data head and detailed statistics to string for inclusion in the prompt
-    data_head_str = data_head.to_string(index=False)
-    detailed_stats_str = detailed_stats.to_string(index=False)
+    data_head_str = data_head.head().to_pandas().to_string(index=False)
+    detailed_stats_str = detailed_stats.describe().to_pandas().to_string(index=False)
     
     # Build the prompt
     prompt = f"""
@@ -204,13 +180,12 @@ def suggest_target_column(task: str, available_columns: pd.Index, use_case: str,
    
     return suggested_column
 
-
-def generate_leaderboard_commentary(use_case: str, data_head: pd.DataFrame, selected_models: List[str], leaderboard: pd.DataFrame) -> str:
+def generate_leaderboard_commentary(use_case: str, data_head: pl.DataFrame, selected_models: List[str], leaderboard: pl.DataFrame) -> str:
     """Generate commentary on the leaderboard from the LLM."""
     
     # Convert data head and leaderboard to string for inclusion in the prompt
-    data_head_str = data_head.to_string(index=False)
-    leaderboard_str = leaderboard.to_string(index=False)
+    data_head_str = data_head.head().to_pandas().to_string(index=False)
+    leaderboard_str = leaderboard.to_pandas().to_string(index=False)
 
     prompt = f"""
     You are an AI assistant specialized in machine learning. Your task is to provide a commentary on the model leaderboard.
@@ -232,14 +207,15 @@ def generate_leaderboard_commentary(use_case: str, data_head: pd.DataFrame, sele
    
     return leaderboard_commentary
 
-def explain_predictions_commentary(predictions_df, actual_values: pd.Series = None) -> str:
-    pred_summary = predictions_df['predict'].describe().to_dict()
+def explain_predictions_commentary(predictions_df: pl.DataFrame, actual_values: pl.Series = None) -> str:
+    pred_summary = predictions_df.select(pl.col('predict').describe()).to_pandas().to_dict()
     total_predictions = len(predictions_df)
 
     performance_metrics = ""
     if actual_values is not None:
-        mse = mean_squared_error(actual_values, predictions_df['predict'])
-        r2 = r2_score(actual_values, predictions_df['predict'])
+        actual_values_pd = actual_values.to_pandas()
+        mse = mean_squared_error(actual_values_pd, predictions_df['predict'].to_pandas())
+        r2 = r2_score(actual_values_pd, predictions_df['predict'].to_pandas())
         performance_metrics = f"Mean Squared Error: {mse:.4f}\nR-squared: {r2:.4f}"
 
     prompt = f"""
@@ -258,9 +234,8 @@ def explain_predictions_commentary(predictions_df, actual_values: pd.Series = No
     explanation = get_llm_response(prompt)
     return explanation
 
-
-def explain_feature_importance_commentary(feature_importance_df) -> str:
-    feature_importance_summary = feature_importance_df.describe().to_dict()
+def explain_feature_importance_commentary(feature_importance_df: pl.DataFrame) -> str:
+    feature_importance_summary = feature_importance_df.describe().to_pandas().to_dict()
 
     prompt = f"""
     Analyze the following feature importance summary and provide insights:
@@ -274,10 +249,9 @@ def explain_feature_importance_commentary(feature_importance_df) -> str:
     explanation = get_llm_response(prompt)
     return explanation
 
-
-def explain_insights_commentary(predictions_df, feature_importance_df) -> str:
-    pred_summary = predictions_df['predict'].describe().to_dict()
-    feature_importance_summary = feature_importance_df.describe().to_dict()
+def explain_insights_commentary(predictions_df: pl.DataFrame, feature_importance_df: pl.DataFrame) -> str:
+    pred_summary = predictions_df.select(pl.col('predict').describe()).to_pandas().to_dict()
+    feature_importance_summary = feature_importance_df.describe().to_pandas().to_dict()
 
     prompt = f"""
     Provide a business-oriented analysis of the following machine learning model predictions and feature importance:
@@ -294,15 +268,15 @@ def explain_insights_commentary(predictions_df, feature_importance_df) -> str:
     explanation = get_llm_response(prompt)
     return explanation
 
-def generate_industry_report(use_case, task, data, target_column, aml, predictions, feature_importance):
+def generate_industry_report(use_case: str, task: str, data: pl.DataFrame, target_column: str, aml, predictions: pl.DataFrame, feature_importance: pl.DataFrame) -> str:
     """Generate a comprehensive, jargon-free industry report based on the ML analysis."""
     
     # Safely convert to pandas DataFrame if needed
     def safe_to_pandas(df):
         if isinstance(df, h2o.H2OFrame):
             return df.as_data_frame()
-        elif isinstance(df, pd.DataFrame):
-            return df
+        elif isinstance(df, pl.DataFrame):
+            return df.to_pandas()
         else:
             return pd.DataFrame(df)  # Attempt to convert unknown types
 

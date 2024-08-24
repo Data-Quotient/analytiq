@@ -1,7 +1,7 @@
 import streamlit as st
 from sqlalchemy.orm import Session
 from models import Dataset, DQRule, get_db
-import pandas as pd
+import polars as pl
 
 def main():
     st.title("Data Quality Rules")
@@ -20,8 +20,9 @@ def main():
         selected_dataset = db.query(Dataset).filter(Dataset.name == selected_dataset_name).first()
         st.subheader(f"Define Rules for {selected_dataset_name}")
         
-        df = pd.read_csv(selected_dataset.filepath)
-        columns = df.columns.tolist()
+        # Read the dataset using polars
+        df = pl.read_csv(selected_dataset.filepath)
+        columns = df.columns
 
         rule_type = st.selectbox("Rule Type", ["Range Check", "Null Check", "Uniqueness Check", "Custom Lambda"])
         
@@ -57,11 +58,13 @@ def main():
                     db.add(new_rule)
                 db.commit()
                 st.success(f"Rule '{rule_name}' added successfully!")
+        
         st.subheader(f"Existing Rules for {selected_dataset_name}")
         rules = db.query(DQRule).filter(DQRule.dataset_id == selected_dataset.id).all()
         
         if rules:
-            df_rules = pd.DataFrame([{
+            # Convert rules to a polars DataFrame
+            df_rules = pl.DataFrame([{
                 "Rule Name": rule.rule_name,
                 "Type": rule.rule_type,
                 "Column": rule.target_column,

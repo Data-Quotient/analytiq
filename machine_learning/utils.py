@@ -1,6 +1,6 @@
+import polars as pl
 import h2o
 from h2o.automl import H2OAutoML
-import pandas as pd
 from typing import Dict, Any, List
 from llm.utils import explain_predictions
 import streamlit as st
@@ -11,10 +11,11 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_JUSTIFY
 import io
 
-def run_h2o_automl(data: pd.DataFrame, target_column: str, problem_type: str, selected_models: List[str], max_models: int = 20):
+def run_h2o_automl(data: pl.DataFrame, target_column: str, problem_type: str, selected_models: List[str], max_models: int = 20):
     h2o.init()
     
-    h2o_data = h2o.H2OFrame(data)
+    # Convert polars DataFrame to pandas DataFrame for H2O
+    h2o_data = h2o.H2OFrame(data.to_pandas())
     
     x = h2o_data.columns
     y = target_column
@@ -37,16 +38,16 @@ def run_selected_model():
         st.session_state.feature_importance = selected_model.varimp(use_pandas=True)
 
 def get_explanation():
-    predictions_df = st.session_state.predictions.as_data_frame()
+    predictions_df = st.session_state.predictions.to_pandas()  # Convert polars DataFrame to pandas DataFrame
     feature_importance_dict = st.session_state.feature_importance.to_dict() if st.session_state.feature_importance is not None else None
     st.session_state.explanation = explain_predictions(
         predictions_df, 
         st.session_state.problem_type,
         feature_importance_dict,
-        st.session_state.actual_values
+        st.session_state.actual_values.to_pandas() if st.session_state.actual_values is not None else None  # Convert polars Series to pandas Series
     )
 
-def generate_pdf_report(report_content):
+def generate_pdf_report(report_content: str) -> io.BytesIO:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter,
                             rightMargin=72, leftMargin=72,
@@ -71,6 +72,7 @@ def generate_pdf_report(report_content):
     doc.build(story)
     buffer.seek(0)
     return buffer
+
 def save_model(model, file_name: str):
     """Save the model using the built-in pickle module."""
     with open(file_name, 'wb') as file:

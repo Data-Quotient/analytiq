@@ -1,4 +1,5 @@
 import pandas as pd
+import polars as pl
 import streamlit as st
 
 import plotly.express as px
@@ -20,11 +21,11 @@ def display_summary_tiles(summary):
     col3.metric("Memory Usage (MB)", summary['Memory Usage (MB)'])
 
 # Function to display the column-level summary and distribution side by side
-def display_column_summary(df, column):
+def display_column_summary(df: pl.DataFrame, column):
     """Displays the summary of the selected column with distribution plots."""
     summary = column_summary(df, column)
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.write("Data Type:", summary['Data Type'])
         st.write("Unique Values:", summary['Unique Values'])
@@ -35,17 +36,23 @@ def display_column_summary(df, column):
         st.write("Standard Deviation:", summary['Standard Deviation'])
         st.write("Min:", summary['Min'])
         st.write("Max:", summary['Max'])
-    
+
     with col2:
         st.subheader(f"Distribution of {column}")
-        if pd.api.types.is_numeric_dtype(df[column]):
-            fig = px.histogram(df, x=column, marginal="box", nbins=30, title=f'Distribution of {column}')
+        
+        # Add a confirmation button
+        if st.button(f"Show Distribution for {column}"):
+            with st.spinner('Generating distribution chart...'):
+                if pd.api.types.is_numeric_dtype(df[column]):
+                    fig = px.histogram(df, x=column, marginal="box", nbins=30, title=f'Distribution of {column}')
+                else:
+                    fig = px.histogram(df, x=column, color=column, title=f'Distribution of {column}')
+                
+                st.plotly_chart(fig, use_container_width=True)
         else:
-            fig = px.histogram(df, x=column, color=column, title=f'Distribution of {column}')
-        st.plotly_chart(fig, use_container_width=True)
-
+            st.write("Press the button to see the distribution.")
 # Function to handle the first tab (Data Summary)
-def handle_data_summary_tab(filtered_data):
+def handle_data_summary_tab(filtered_data: pl.DataFrame):
     """Handles all content and logic within the Data Summary tab."""
     st.header("Data Summary")
     

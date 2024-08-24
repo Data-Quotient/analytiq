@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-import pandas as pd
+import polars as pl
 from db_utils import add_dataset
 from sqlalchemy.orm import Session
 from models import Dataset, get_db
@@ -57,7 +57,7 @@ def main():
         st.subheader("Existing Datasets")
 
         # Convert datasets to a DataFrame for better display
-        df = pd.DataFrame([{
+        df = pl.DataFrame([{
             'Name': dataset.name,
             'Description': dataset.description,
             'File Path': dataset.filepath
