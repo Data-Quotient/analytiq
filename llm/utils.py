@@ -44,7 +44,7 @@ def get_llm_response(prompt: str) -> str:
         
         if use_ollama:
             print("Using Ollama")
-            res= get_ollama_response("You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers. "+prompt, use_pycurl=False)
+            res= get_ollama_response("You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers. "+prompt)
             print("Got a response")
             print(res)
             return res
