@@ -73,24 +73,27 @@ def apply_dq_rules(df, rules):
     
     for rule in rules:
         target_column = rule.target_column
-        
+
         try:
             # Check if the target column exists before applying the rule
             if target_column not in df.columns:
                 raise KeyError(f"Column '{target_column}' not found.")
 
-            # Define the lambda function directly in the rule
+            # Define the condition based on the rule type
             if rule.rule_type == "Range Check":
-                condition = lambda x: eval(rule.condition)
+                # 'eval' the custom condition (should be a string like "x > 10 and x < 20")
+                condition = pl.col(target_column).apply(lambda x: eval(rule.condition))
             elif rule.rule_type == "Null Check":
-                condition = lambda x: x.is_not_null()
+                condition = pl.col(target_column).is_not_null()
             elif rule.rule_type == "Uniqueness Check":
-                condition = lambda x: x.is_unique
+                # Polars uniqueness check is done through n_unique comparison
+                condition = (pl.col(target_column).n_unique() == pl.col(target_column).count())
             elif rule.rule_type == "Custom Lambda":
-                condition = eval(rule.condition)  # Custom Lambda provided by the user
+                # Custom Lambda condition provided by the user
+                condition = pl.col(target_column).apply(eval(rule.condition))  # Ensure rule.condition is a valid lambda
 
             # Apply the condition and check for violations
-            if not df[target_column].apply(condition).all():
+            if not df.select(condition).to_series().all():
                 violations.append({
                     'column': target_column,
                     'message': rule.message,
@@ -110,7 +113,7 @@ def apply_dq_rules(df, rules):
                 'column': target_column,
                 'message': f"Error applying rule: {str(e)}",
                 'severity': 'High'
-            })
+            }) 
     
     return violations
 
