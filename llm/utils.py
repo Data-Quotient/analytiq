@@ -30,38 +30,30 @@ except ModuleNotFoundError as e:
 
 import pandas as pd
 from machine_learning.model_mapping import MODEL_MAPPING
-from llm.ollama_utils import get_ollama_response
+
 
 # Load the OpenAI API key from Streamlit secrets
-def get_llm_response(prompt: str) -> str:    
-    
-    system_prompt = {'BASE':"You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers."}
-    
+
+def get_llm_response(prompt: str) -> str:
     try:
-        use_ollama = st.secrets["OLLAMA_USAGE"] == "True"
-        
-        if use_ollama:
-            res= get_ollama_response(system_prompt['BASE']+prompt)
-            return res
-        else:
-            client = OpenAI(api_key=st.secrets.get("openai_api_key"))
+        # Initialize the OpenAI client
+        client = OpenAI(api_key = st.secrets["openai_api_key"])
 
-            # Create the chat completion
-            completion = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt['BASE']},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0
-            )
+        # Create the chat completion
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        )
 
-            # Return the content of the response
-            return completion.choices[0].message.content
+        # Return the content of the response
+        return completion.choices[0].message.content
     
     except Exception as e:
         return f"Error getting LLM explanation: {str(e)}"
-
 
     
 def suggest_models(use_case: str, problem_type: str, data_head: pd.DataFrame, summary: dict, detailed_stats: pd.DataFrame) -> List[str]:
