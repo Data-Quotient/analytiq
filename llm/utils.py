@@ -5,7 +5,6 @@ try:
     from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
     import streamlit as st
     import h2o
-    from dotenv import load_dotenv
 
 except ModuleNotFoundError as e:
     import subprocess
@@ -32,12 +31,8 @@ except ModuleNotFoundError as e:
 import pandas as pd
 from machine_learning.model_mapping import MODEL_MAPPING
 from llm.ollama_utils import get_ollama_response
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Load the OpenAI API key from Streamlit secrets
-
 def get_llm_response(prompt: str) -> str:    
     
     system_prompt = {'BASE':"You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers."}
