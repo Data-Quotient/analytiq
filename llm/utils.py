@@ -40,13 +40,10 @@ load_dotenv()
 
 def get_llm_response(prompt: str) -> str:    
     try:
-        use_ollama = os.getenv("OLLAMA_USAGE") == "True"
+        use_ollama = st.secrets["OLLAMA_USAGE"] == "True"
         
         if use_ollama:
-            print("Using Ollama")
             res= get_ollama_response("You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers. "+prompt)
-            print("Got a response")
-            print(res)
             return res
         else:
             client = OpenAI(api_key=st.secrets.get("openai_api_key"))
