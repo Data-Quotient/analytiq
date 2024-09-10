@@ -39,11 +39,14 @@ load_dotenv()
 # Load the OpenAI API key from Streamlit secrets
 
 def get_llm_response(prompt: str) -> str:    
+    
+    system_prompt = {'BASE':"You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers."}
+    
     try:
         use_ollama = st.secrets["OLLAMA_USAGE"] == "True"
         
         if use_ollama:
-            res= get_ollama_response("You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers. "+prompt)
+            res= get_ollama_response(system_prompt['BASE']+prompt)
             return res
         else:
             client = OpenAI(api_key=st.secrets.get("openai_api_key"))
@@ -52,7 +55,7 @@ def get_llm_response(prompt: str) -> str:
             completion = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are an AI assistant that provides insightful analysis of machine learning models and results, focusing on actionable insights for business decision-makers."},
+                    {"role": "system", "content": system_prompt['BASE']},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0

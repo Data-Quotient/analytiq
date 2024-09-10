@@ -1,6 +1,5 @@
 import streamlit as st
 from ollama import Client
-import json
 
 # Access configuration from Streamlit secrets
 OLLAMA_URL = st.secrets["OLLAMA_URL"]
@@ -11,18 +10,18 @@ def get_ollama_response(prompt):
     client = Client(host=OLLAMA_URL)
     
     # Generate a response using the Ollama client
-    response = client.generate(
+    response = client.chat(
         model=MODEL_NAME,
-        prompt=prompt,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
         options={
             "temperature": TEMPERATURE
         }
     )
     
-    # Extract the full response text
-    full_response = ""
-    for part in response:
-        if 'response' in part:
-            full_response += part['response']
-    
-    return full_response
+    # The response is now a dictionary, we can directly access the content
+    return response['message']['content']
