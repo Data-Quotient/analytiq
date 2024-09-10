@@ -4,3 +4,4 @@ mydatabase.db
 .streamlit/secrets.toml
 *.parquet
 *.csv
+.venv
