@@ -42,7 +42,7 @@ def generate_summary(df: pl.DataFrame):
     return summary
 
 # Function to display detailed statistics for each column
-def detailed_statistics(df):
+def detailed_statistics(df: pl.DataFrame):
     """Displays detailed statistics for each column."""
     return df.describe()
 

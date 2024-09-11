@@ -1,4 +1,5 @@
 import polars as pl
+import pandas as pd
 from typing import List, Dict, Any
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
 import streamlit as st
@@ -45,7 +46,7 @@ def suggest_models(use_case: str, problem_type: str, data_head: pl.DataFrame, su
 
     # Convert data head and detailed statistics to string for inclusion in the prompt
     data_head_str = data_head.head().to_pandas().to_string(index=False)
-    detailed_stats_str = detailed_stats.describe().to_pandas().to_string(index=False)
+    detailed_stats_str = detailed_stats.to_pandas().to_string(index=False)
 
     prompt = f"""
     You are an AI assistant that suggests the most appropriate machine learning models based on the use case, data summary, and statistics provided.
@@ -73,7 +74,7 @@ def suggest_models(use_case: str, problem_type: str, data_head: pl.DataFrame, su
     """
 
     suggestions = get_llm_response(prompt)
-
+    print(suggestions)
     # Split the suggestions into a list and strip whitespace
     suggested_models = [model.strip() for model in suggestions.split(',')]
 
@@ -150,11 +151,11 @@ def suggest_target_column(task: str, available_columns: pl.Series, use_case: str
     """Suggest the most appropriate target column based on the task, list of available columns, use case, and dataset details."""
     
     # Convert columns list to a string
-    columns_str = ", ".join(available_columns.to_list())
+    columns_str = ", ".join(available_columns)
     
     # Convert data head and detailed statistics to string for inclusion in the prompt
-    data_head_str = data_head.head().to_pandas().to_string(index=False)
-    detailed_stats_str = detailed_stats.describe().to_pandas().to_string(index=False)
+    data_head_str = data_head.head().to_string(index=False)
+    detailed_stats_str = detailed_stats.to_pandas().to_string(index=False)
     
     # Build the prompt
     prompt = f"""
@@ -189,8 +190,8 @@ def generate_leaderboard_commentary(use_case: str, data_head: pl.DataFrame, sele
     """Generate commentary on the leaderboard from the LLM."""
     
     # Convert data head and leaderboard to string for inclusion in the prompt
-    data_head_str = data_head.head().to_pandas().to_string(index=False)
-    leaderboard_str = leaderboard.to_pandas().to_string(index=False)
+    data_head_str = data_head.head().to_string(index=False)
+    leaderboard_str = leaderboard.to_string(index=False)
 
     prompt = f"""
     You are an AI assistant specialized in machine learning. Your task is to provide a commentary on the model leaderboard.
@@ -213,7 +214,11 @@ def generate_leaderboard_commentary(use_case: str, data_head: pl.DataFrame, sele
     return leaderboard_commentary
 
 def explain_predictions_commentary(predictions_df: pl.DataFrame, actual_values: pl.Series = None) -> str:
-    pred_summary = predictions_df.select(pl.col('predict').describe()).to_pandas().to_dict()
+    # Convert the H2OFrame to a Pandas DataFrame
+    predictions_df_pd = predictions_df.as_data_frame(use_multi_thread=True)
+
+    # Select the 'predict' column and get its descriptive statistics using Pandas
+    pred_summary = predictions_df_pd['predict'].describe().to_dict()
     total_predictions = len(predictions_df)
 
     performance_metrics = ""
@@ -240,7 +245,7 @@ def explain_predictions_commentary(predictions_df: pl.DataFrame, actual_values: 
     return explanation
 
 def explain_feature_importance_commentary(feature_importance_df: pl.DataFrame) -> str:
-    feature_importance_summary = feature_importance_df.describe().to_pandas().to_dict()
+    feature_importance_summary = feature_importance_df.describe().to_dict()
 
     prompt = f"""
     Analyze the following feature importance summary and provide insights:
@@ -255,8 +260,12 @@ def explain_feature_importance_commentary(feature_importance_df: pl.DataFrame) -
     return explanation
 
 def explain_insights_commentary(predictions_df: pl.DataFrame, feature_importance_df: pl.DataFrame) -> str:
-    pred_summary = predictions_df.select(pl.col('predict').describe()).to_pandas().to_dict()
-    feature_importance_summary = feature_importance_df.describe().to_pandas().to_dict()
+    # Convert the H2OFrame to a Pandas DataFrame
+    predictions_df_pd = predictions_df.as_data_frame(use_multi_thread=True)
+
+    # Select the 'predict' column and get its descriptive statistics using Pandas
+    pred_summary = predictions_df_pd['predict'].describe().to_dict()
+    feature_importance_summary = feature_importance_df.describe().to_dict()
 
     prompt = f"""
     Provide a business-oriented analysis of the following machine learning model predictions and feature importance:
