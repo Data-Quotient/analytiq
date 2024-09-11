@@ -4,34 +4,12 @@ import polars as pl
 from db_utils import add_dataset
 from sqlalchemy.orm import Session
 from models import Dataset, get_db
+from polars_datatypes import DATA_TYPE_OPTIONS
 
 # Constants
 DATASETS_DIR = "datasets"
 os.makedirs(DATASETS_DIR, exist_ok=True)
 
-DATA_TYPE_OPTIONS = {
-    "Int8": pl.Int8,
-    "Int16": pl.Int16,
-    "Int32": pl.Int32,
-    "Int64": pl.Int64,
-    "UInt8": pl.UInt8,
-    "UInt16": pl.UInt16,
-    "UInt32": pl.UInt32,
-    "UInt64": pl.UInt64,
-    "Float32": pl.Float32,
-    "Float64": pl.Float64,
-    "Utf8": pl.Utf8,
-    "Boolean": pl.Boolean,
-    "Date": pl.Date,
-    "Datetime": pl.Datetime,
-    "Date": pl.Date,
-    "Time": pl.Time,
-    "Duration": pl.Duration,
-    "Categorical": pl.Categorical,
-    "List": pl.List,
-    "Object": pl.Object,
-    "String": pl.String
-}
 
 def upload_file():
     """Handles file upload and returns the file path."""

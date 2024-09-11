@@ -4,13 +4,8 @@ import json
 import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
 from scipy.stats import zscore
+from polars_datatypes import NUMERIC_TYPES, DATA_TYPE_OPTIONS
 import ast
-
-NUMERIC_TYPES = [
-    pl.Int8, pl.Int16, pl.Int32, pl.Int64, 
-    pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64, 
-    pl.Float32, pl.Float64
-]
 
 # Function to load datasets
 def load_datasets(folder_path):
@@ -120,100 +115,83 @@ def apply_dq_rules(df, rules):
     
     return violations
 
-def apply_operations_to_dataset(dataset, actions):
-    """
-    Apply a list of actions to a dataset.
-    
-    Args:
-        dataset (DataFrame): The dataset to which actions will be applied.
-        actions (list): List of DatasetAction objects.
-        
-    Returns:
-        DataFrame: The dataset after all actions have been applied.
-    """
-    for action in actions:
-        action_type = action.action_type
-        parameters = json.loads(action.parameters)  # Decode JSON string to dictionary
-        
-        if action_type == "Rename Column":
+def apply_operations_to_dataset(dataset, operations):
+    print(dataset)
+    for operation in operations:
+        operation_type = operation.operation_type
+        parameters = json.loads(operation.parameters)
+        if operation_type == "Rename Column":
             dataset = dataset.rename({parameters["old_name"]: parameters["new_name"]})
         
-        elif action_type == "Change Data Type":
-            dataset = dataset.with_column(pl.col(parameters["column"]).cast(parameters["new_type"]))
+        elif operation_type == "Change Data Type":
+            dataset = dataset.with_columns(pl.col(parameters["column"]).cast(DATA_TYPE_OPTIONS[parameters['new_type']]))
         
-        elif action_type == "Delete Column":
+        elif operation_type == "Delete Column":
             dataset = dataset.drop(parameters["columns"])
         
-        elif action_type == "Filter Rows":
+        elif operation_type == "Filter Rows":
             dataset = dataset.filter(pl.col(parameters["condition"]))
         
-        elif action_type == "Add Calculated Column":
-            dataset = dataset.with_column(pl.eval(parameters["formula"]).alias(parameters["new_column"]))
+        elif operation_type == "Add Calculated Column":
+            dataset = dataset.with_columns(eval(parameters["formula"], {'__builtins__': None}, dataset.to_dict(False)).alias(parameters["new_column"]))
         
-        elif action_type == "Fill Missing Values":
+        elif operation_type == "Fill Missing Values":
             if parameters["method"] == "Specific Value":
-                dataset = dataset.fill_null(pl.lit(parameters["value"]))
+                dataset = dataset.with_columns(pl.col(parameters["column"]).fill_null(parameters["value"]))
             elif parameters["method"] == "Mean":
-                mean = dataset[parameters["column"]].mean()
-                dataset = dataset.fill_null(mean)
+                dataset = dataset.with_columns(pl.col(parameters["column"]).fill_null(dataset.select(pl.col(parameters["column"]).mean())))
             elif parameters["method"] == "Median":
-                median = dataset[parameters["column"]].median()
-                dataset = dataset.fill_null(median)
+                dataset = dataset.with_columns(pl.col(parameters["column"]).fill_null(dataset.select(pl.col(parameters["column"]).median())))
             elif parameters["method"] == "Mode":
-                mode = dataset[parameters["column"]].mode()[0]
-                dataset = dataset.fill_null(mode)
+                mode_value = dataset.select(pl.col(parameters["column"]).mode())[0, 0]
+                dataset = dataset.with_columns(pl.col(parameters["column"]).fill_null(mode_value))
         
-        elif action_type == "Duplicate Column":
-            dataset = dataset.with_column(dataset[parameters["column"]].alias(f"{parameters['column']}_duplicate"))
+        elif operation_type == "Duplicate Column":
+            dataset = dataset.with_columns(pl.col(parameters["column"]).alias(f"{parameters['column']}_duplicate"))
         
-        elif action_type == "Reorder Columns":
+        elif operation_type == "Reorder Columns":
             dataset = dataset.select(parameters["new_order"])
         
-        elif action_type == "Replace Values":
-            dataset = dataset.with_column(pl.col(parameters["column"]).replace(parameters["to_replace"], parameters["replace_with"]))
+        elif operation_type == "Replace Values":
+            dataset = dataset.with_columns(pl.col(parameters["column"]).apply(lambda x: parameters["replace_with"] if x == parameters["to_replace"] else x))
         
-        # Handle Preprocessing Actions
-        elif action_type == "Scale Data":
+        elif operation_type == "Scale Data":
             scaler = StandardScaler() if parameters["method"] == "StandardScaler" else MinMaxScaler()
-            scaled_data = scaler.fit_transform(dataset[parameters["columns"]])
-            dataset = dataset.with_columns([pl.Series(col, scaled_data[:, idx]) for idx, col in enumerate(parameters["columns"])])
+            scaled_columns = scaler.fit_transform(dataset.select(parameters["columns"]).to_numpy())
+            dataset = dataset.with_columns([pl.Series(col, scaled_columns[:, idx]) for idx, col in enumerate(parameters["columns"])])
         
-        elif action_type == "Encode Data":
+        elif operation_type == "Encode Data":
             if parameters["type"] == "OneHotEncoding":
-                encoder = OneHotEncoder(sparse_output=False, drop='first')
-                encoded_data = encoder.fit_transform(dataset[parameters["columns"]])
-                encoded_df = pl.DataFrame(encoded_data, columns=encoder.get_feature_names_out(parameters["columns"]))
-                dataset = dataset.drop(parameters["columns"])
-                dataset = dataset.hstack(encoded_df)
+                encoder = OneHotEncoder(sparse=False, drop='first')
+                encoded_data = encoder.fit_transform(dataset.select(parameters["columns"]).to_numpy())
+                encoded_df = pl.DataFrame(encoded_data, schema=encoder.get_feature_names_out(parameters["columns"]).tolist())
+                dataset = dataset.drop(parameters["columns"]).hstack(encoded_df)
             else:
                 encoder = LabelEncoder()
                 for col in parameters["columns"]:
-                    dataset = dataset.with_column(pl.col(col).apply(lambda x: encoder.fit_transform(x)))
+                    dataset = dataset.with_columns(pl.Series(col, encoder.fit_transform(dataset[col].to_numpy())))
         
-        elif action_type == "Impute Missing Values":
+        elif operation_type == "Impute Missing Values":
             for col in parameters["columns"]:
                 if parameters["method"] == "Mean":
-                    mean = dataset[col].mean()
-                    dataset = dataset.fill_null(pl.lit(mean))
+                    dataset = dataset.with_columns(pl.col(col).fill_null(dataset.select(pl.col(col)).mean()))
                 elif parameters["method"] == "Median":
-                    median = dataset[col].median()
-                    dataset = dataset.fill_null(pl.lit(median))
+                    dataset = dataset.with_columns(pl.col(col).fill_null(dataset.select(pl.col(col)).median()))
                 elif parameters["method"] == "Mode":
-                    mode = dataset[col].mode()[0]
-                    dataset = dataset.fill_null(pl.lit(mode))
-
-        elif action_type == "Remove Outliers":
-            if parameters["method"] == "IQR Method":
-                Q1 = dataset[parameters["column"]].quantile(0.25)
-                Q3 = dataset[parameters["column"]].quantile(0.75)
-                IQR = Q3 - Q1
-                dataset = dataset.filter(~((pl.col(parameters["column"]) < (Q1 - 1.5 * IQR)) | (pl.col(parameters["column"]) > (Q3 + 1.5 * IQR))))
-            elif parameters["method"] == "Z-Score Method":
-                z_scores = zscore(dataset[parameters["column"]])
-                dataset = dataset.filter(pl.col(parameters["column"]).apply(lambda x: abs(x) < 3))
+                    mode_value = dataset.select(pl.col(col).mode())[0, 0]
+                    dataset = dataset.with_columns(pl.col(col).fill_null(mode_value))
         
-        elif action_type == "Merge Datasets":
-            from models import get_db, DatasetAction, Dataset, DatasetVersion  # Import the Dataset model and database session
+        elif operation_type == "Remove Outliers":
+            if parameters["method"] == "IQR Method":
+                Q1 = dataset.select(pl.col(parameters["column"]).quantile(0.25)).to_numpy()[0, 0]
+                Q3 = dataset.select(pl.col(parameters["column"]).quantile(0.75)).to_numpy()[0, 0]
+                IQR = Q3 - Q1
+                dataset = dataset.filter((pl.col(parameters["column"]) >= (Q1 - 1.5 * IQR)) & (pl.col(parameters["column"]) <= (Q3 + 1.5 * IQR)))
+            elif parameters["method"] == "Z-Score Method":
+                dataset = dataset.filter((pl.col(parameters["column"]) - dataset.select(pl.col(parameters["column"]).mean())) / dataset.select(pl.col(parameters["column"]).std()) < 3)
+        
+        elif operation_type == "Merge Datasets":
+            from models import get_db, DatasetOperation, Dataset, DatasetVersion
             from sqlalchemy.orm import Session
 
             merge_with = parameters["merge_with"]
@@ -221,9 +199,7 @@ def apply_operations_to_dataset(dataset, actions):
             join_type = parameters["join_type"]
             merge_version_num = parameters["merge_version"]
             
-            # Load the dataset to merge with
             db: Session = next(get_db())
-
             selected_dataset = db.query(Dataset).filter(Dataset.id == merge_with).first()
 
             selected_version = db.query(DatasetVersion).filter(
@@ -232,12 +208,10 @@ def apply_operations_to_dataset(dataset, actions):
             ).first()
             selected_data = load_data(selected_version.dataset.filepath)
 
-            # Apply actions recorded for the selected version
-            actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version.id).all()
-            if actions:
-                selected_data = apply_actions_to_dataset(selected_data, actions)
+            operations = db.query(DatasetOperation).filter(DatasetOperation.version_id == selected_version.id).all()
+            if operations:
+                selected_data = apply_operations_to_dataset(selected_data, operations)
 
-            # Perform the merge between the original dataset and the selected merge dataset version
             dataset = dataset.join(selected_data, on=merge_column, how=join_type)
 
     return dataset

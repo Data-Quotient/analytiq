@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
 from scipy.stats import zscore
-
+from polars_datatypes import DATA_TYPE_OPTIONS
 from data_utils import load_data, apply_operations_to_dataset
 
 def log_operation(version_id, operation_type, parameters):
@@ -61,28 +61,15 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
 
     elif operation == "Change Data Type":
         selected_column = st.selectbox("Select Column to Change Data Type", filtered_data.columns)
-        new_data_type = st.selectbox("Select New Data Type", ["int", "float", "str", "bool"])
+        new_data_type = st.selectbox("Select New Data Type", DATA_TYPE_OPTIONS.keys())
         if st.button("Change Data Type"):
             try:
-                if new_data_type == "int":
-                    filtered_data = filtered_data.with_columns([
-                        pl.col(selected_column).cast(pl.Int64)
-                    ])
-                elif new_data_type == "float":
-                    filtered_data = filtered_data.with_columns([
-                        pl.col(selected_column).cast(pl.Float64)
-                    ])
-                elif new_data_type == "str":
-                    filtered_data = filtered_data.with_columns([
-                        pl.col(selected_column).cast(pl.Utf8)
-                    ])
-                elif new_data_type == "bool":
-                    filtered_data = filtered_data.with_columns([
-                        pl.col(selected_column).cast(pl.Boolean)
-                    ])
+                filtered_data = filtered_data.with_columns([
+                    pl.col(selected_column).cast(DATA_TYPE_OPTIONS[new_data_type])
+                ])
                 st.write(f"Changed data type of column {selected_column} to {new_data_type}")
                 log_operation(selected_version.id, "Change Data Type", {"column": selected_column, "new_type": new_data_type})
-            except ValueError as e:
+            except Exception as e:
                 st.error(f"Error changing data type: {e}")
             
 
