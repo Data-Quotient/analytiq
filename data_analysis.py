@@ -2,6 +2,7 @@ import streamlit as st
 import polars as pl
 import plotly.express as px
 from data_utils import *
+from polars_datatypes import NUMERIC_TYPES
 
 def display_bivariate_analysis(df: pl.DataFrame, x_column: str, y_column: str):
     """Displays bivariate analysis including scatter plots, bar charts, or correlation coefficients."""
@@ -27,7 +28,7 @@ def display_bivariate_analysis(df: pl.DataFrame, x_column: str, y_column: str):
             st.plotly_chart(scatter_fig, use_container_width=True)
             
             st.write("Correlation Coefficient")
-            correlation = df.select(pl.correlation(x_column, y_column)).to_pandas().iloc[0, 0]
+            correlation = df.select(pl.corr(x_column, y_column)).to_pandas().iloc[0, 0]
             st.metric(label=f"Correlation between {x_column} and {y_column}", value=f"{correlation:.2f}")
         
         elif pl.datatypes.Utf8 in [df[x_column].dtype, df[y_column].dtype]:
@@ -134,7 +135,7 @@ def display_correlation_analysis(df: pl.DataFrame):
     st.write("Analyzing correlations between numerical variables")
 
     # Select only numeric columns for correlation analysis
-    numeric_df = df.select(pl.col(pl.Float32) | pl.col(pl.Float64) | pl.col(pl.Int8) | pl.col(pl.Int16) | pl.col(pl.Int32) | pl.col(pl.Int64))
+    numeric_df = df.select([pl.col(col) for col in df.columns if df.schema[col] in NUMERIC_TYPES])
     
     if numeric_df.is_empty():
         st.warning("No numeric columns available for correlation analysis.")

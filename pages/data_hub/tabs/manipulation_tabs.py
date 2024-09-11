@@ -80,7 +80,7 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
             st.write(f"Deleted columns: {', '.join(selected_columns)}")
             log_operation(selected_version.id, "Delete Column", {"columns": selected_columns})
 
-    elif operation == "Filter Rows":
+    elif operation == "Filter Rows": # TODO: Fix this
         filter_condition = st.text_input("Enter Filter Condition (e.g., `age >= 18`)")
         if st.button("Apply Filter"):
             try:
@@ -89,7 +89,7 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
                 log_operation(selected_version.id, "Filter Rows", {"condition": filter_condition})
             except Exception as e:
                 st.error(f"Error applying filter: {e}")
-    elif operation == "Add Calculated Column":
+    elif operation == "Add Calculated Column": # TODO: Fix this
         new_column_name = st.text_input("Enter New Column Name")
         formula = st.text_input("Enter Formula (e.g., `quantity * price`)")
         if st.button("Add Calculated Column"):
@@ -107,7 +107,9 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
         fill_value = st.text_input("Enter Value (if 'Specific Value' selected)")
         if st.button("Fill Missing Values"):
             if fill_method == "Specific Value":
-                filtered_data[selected_column].fillna(fill_value, inplace=True)
+                filtered_data = filtered_data.with_columns(
+                    pl.col(selected_column).fill_null(fill_value)
+                )
                 log_operation(selected_version.id, "Fill Missing Values", {"column": selected_column, "method": fill_method, "value": fill_value})
             elif fill_method == "Mean":
                 mean_value = filtered_data[pl.col(selected_column)].mean()
@@ -211,18 +213,19 @@ def handle_preprocessing_tab(filtered_data: pl.DataFrame, selected_version):
                 if impute_method == "Mean":
                     mean_value = filtered_data[col].mean()
                     filtered_data = filtered_data.with_columns([
-                        pl.col(col).fill_none(mean_value)
+                        pl.col(col).fill_null(mean_value)
                     ])
                 elif impute_method == "Median":
                     median_value = filtered_data[col].median()
                     filtered_data = filtered_data.with_columns([
-                        pl.col(col).fill_none(median_value)
+                        pl.col(col).fill_null(median_value)
                     ])
                 elif impute_method == "Mode":
                     mode_value = filtered_data[col].mode()[0]
                     filtered_data = filtered_data.with_columns([
-                        pl.col(col).fill_none(mode_value)
+                        pl.col(col).fill_null(mode_value)
                     ])
+                
             st.write(f"Imputed missing values in columns: {', '.join(selected_columns)} using {impute_method}")
             log_operation(selected_version.id, "Impute Missing Values", {"columns": selected_columns, "method": impute_method})
 

@@ -116,7 +116,6 @@ def apply_dq_rules(df, rules):
     return violations
 
 def apply_operations_to_dataset(dataset, operations):
-    print(dataset)
     for operation in operations:
         operation_type = operation.operation_type
         parameters = json.loads(operation.parameters)
@@ -153,8 +152,15 @@ def apply_operations_to_dataset(dataset, operations):
             dataset = dataset.select(parameters["new_order"])
         
         elif operation_type == "Replace Values":
-            dataset = dataset.with_columns(pl.col(parameters["column"]).apply(lambda x: parameters["replace_with"] if x == parameters["to_replace"] else x))
-        
+            col_dtype = dataset.schema[parameters["column"]]  # Get the data type of the column
+
+            dataset = dataset.with_columns(
+                pl.when(pl.col(parameters["column"]) == pl.lit(parameters["to_replace"]).cast(col_dtype))  # Cast to column type
+                .then(pl.lit(parameters["replace_with"]).cast(col_dtype))  # Ensure the replacement value is also casted
+                .otherwise(pl.col(parameters["column"]))
+                .alias(parameters["column"])  # Ensure the column is updated with the new values
+            )
+                    
         elif operation_type == "Scale Data":
             scaler = StandardScaler() if parameters["method"] == "StandardScaler" else MinMaxScaler()
             scaled_columns = scaler.fit_transform(dataset.select(parameters["columns"]).to_numpy())
