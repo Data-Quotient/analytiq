@@ -61,7 +61,9 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
 
     elif operation == "Change Data Type":
         selected_column = st.selectbox("Select Column to Change Data Type", filtered_data.columns)
-        new_data_type = st.selectbox("Select New Data Type", DATA_TYPE_OPTIONS.keys())
+        col_dtype = filtered_data.schema[selected_column]
+        index = list(DATA_TYPE_OPTIONS.keys()).index(str(col_dtype)) if str(col_dtype) in DATA_TYPE_OPTIONS.keys() else 0
+        new_data_type = st.selectbox("Select New Data Type", DATA_TYPE_OPTIONS.keys(), index=index)
         if st.button("Change Data Type"):
             try:
                 filtered_data = filtered_data.with_columns([
