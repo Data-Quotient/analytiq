@@ -19,8 +19,12 @@ def handle_data_quality_tab(filtered_data, dataset_id):
         violations = apply_dq_rules(filtered_data, rules)
     
     if violations:
-        st.warning("Data Quality Issues Found:")
+        container = st.container(border=True)
+        container.write("Data Quality Issues Found 🚨")
         for violation in violations:
-            st.write(f"{violation['severity']}: {violation['message']} in column {violation['column']}")
+            if violation['severity'] == 'Error':
+                container.error(f"{violation['severity']}: {violation['message']} in column {violation['column']}")
+            else:
+                container.warning(f"{violation['severity']}: {violation['message']} in column {violation['column']}")
     else:
         st.success("No data quality issues found!")

@@ -1,33 +1,42 @@
 import polars as pl
 import os
 import json
-
 import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder
 from scipy.stats import zscore
-from sklearn import __version__ as sklearn_version
+import ast
+
+NUMERIC_TYPES = [
+    pl.Int8, pl.Int16, pl.Int32, pl.Int64, 
+    pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64, 
+    pl.Float32, pl.Float64
+]
 
 # Function to load datasets
 def load_datasets(folder_path):
+    """Loads CSV file names from the specified folder."""
     files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
     return files
 
 # Function to load selected dataset
-def load_data(file_path, limit=None):
-    data = pd.read_csv(file_path)
+def load_data(file_path, limit=None) -> pl.dataframe:
+    """Loads data from the selected CSV file and applies a row limit."""
+    data = pl.read_parquet(file_path)
     if limit:
         data = data.head(limit)
     return data
 
 # Function to apply filters to the dataset
 def apply_filters(df, filters):
+    """Applies the user-selected filters to the DataFrame."""
     for col, val in filters.items():
         if val:
             df = df.filter(pl.col(col) == val)
     return df
 
 # Function to generate a summary of the dataset
-def generate_summary(df):
+def generate_summary(df: pl.DataFrame):
+    """Generates a summary of the DataFrame."""
     summary = {
         'Number of Rows': len(df),
         'Number of Columns': len(df.columns),
@@ -39,10 +48,14 @@ def generate_summary(df):
 
 # Function to display detailed statistics for each column
 def detailed_statistics(df):
-    return df.describe(include='all')
+    """Displays detailed statistics for each column."""
+    return df.describe()
 
 # Function to generate a column-level summary
 def column_summary(df, col):
+    """Generates a detailed summary for a single column."""
+    column = df[col]
+    dtype = column.dtype
     summary = {
         'Data Type': dtype,
         'Unique Values': column.n_unique(),
@@ -63,34 +76,42 @@ def apply_dq_rules(df, rules):
         target_column = rule.target_column
 
         try:
+            # Check if the target column exists before applying the rule
             if target_column not in df.columns:
                 raise KeyError(f"Column '{target_column}' not found.")
 
+            # Define the condition based on the rule type
             if rule.rule_type == "Range Check":
-                # 'eval' the custom condition (should be a string like "x > 10 and x < 20")
-                condition = pl.col(target_column).apply(lambda x: eval(rule.condition))
+                lower_bound, upper_bound = extract_bounds_from_lambda(rule.condition)
+                condition = (pl.col(target_column) > lower_bound) & (pl.col(target_column) < upper_bound)
             elif rule.rule_type == "Null Check":
                 condition = pl.col(target_column).is_not_null()
+            
             elif rule.rule_type == "Uniqueness Check":
-                # Polars uniqueness check is done through n_unique comparison
-                condition = (pl.col(target_column).n_unique() == pl.col(target_column).count())
+                # Polars uniqueness check is done differently: first, convert to list and check uniqueness
+                condition = (pl.col(target_column).n_unique() == pl.count())
+            
             elif rule.rule_type == "Custom Lambda":
-                condition = eval(rule.condition)
-
-            if not df[target_column].apply(condition).all():
+                lambda_func = eval(rule.condition)
+                condition = pl.when(pl.col(target_column).map_elements(lambda_func)).then(True).otherwise(False)
+            # Applying the condition and checking if any violations exist
+            if not df.select(pl.when(condition).then(True).otherwise(False)).to_series().all():
                 violations.append({
                     'column': target_column,
                     'message': rule.message,
                     'severity': rule.severity
                 })
 
+
         except KeyError:
+            # Handle the case where the column was dropped during data manipulation
             violations.append({
                 'column': target_column,
                 'message': f"Column '{target_column}' not found. It may have been dropped during data manipulation.",
-                'severity': 'High'
+                'severity': 'High'  # Adjust severity as needed
             })
         except Exception as e:
+            # Handle any other unexpected errors
             violations.append({
                 'column': target_column,
                 'message': f"Error applying rule: {str(e)}",
@@ -99,27 +120,37 @@ def apply_dq_rules(df, rules):
     
     return violations
 
-def apply_operations_to_dataset(dataset, operations):
-    for operation in operations:
-        operation_type = operation.operation_type
-        parameters = json.loads(operation.parameters)
+def apply_operations_to_dataset(dataset, actions):
+    """
+    Apply a list of actions to a dataset.
+    
+    Args:
+        dataset (DataFrame): The dataset to which actions will be applied.
+        actions (list): List of DatasetAction objects.
         
-        if operation_type == "Rename Column":
-            dataset.rename(columns={parameters["old_name"]: parameters["new_name"]}, inplace=True)
+    Returns:
+        DataFrame: The dataset after all actions have been applied.
+    """
+    for action in actions:
+        action_type = action.action_type
+        parameters = json.loads(action.parameters)  # Decode JSON string to dictionary
         
-        elif operation_type == "Change Data Type":
-            dataset[parameters["column"]] = dataset[parameters["column"]].astype(parameters["new_type"])
+        if action_type == "Rename Column":
+            dataset = dataset.rename({parameters["old_name"]: parameters["new_name"]})
         
-        elif operation_type == "Delete Column":
-            dataset.drop(columns=parameters["columns"], inplace=True)
+        elif action_type == "Change Data Type":
+            dataset = dataset.with_column(pl.col(parameters["column"]).cast(parameters["new_type"]))
         
-        elif operation_type == "Filter Rows":
-            dataset = dataset.query(parameters["condition"])
+        elif action_type == "Delete Column":
+            dataset = dataset.drop(parameters["columns"])
         
-        elif operation_type == "Add Calculated Column":
-            dataset[parameters["new_column"]] = eval(parameters["formula"], {'__builtins__': None}, dataset)
+        elif action_type == "Filter Rows":
+            dataset = dataset.filter(pl.col(parameters["condition"]))
         
-        elif operation_type == "Fill Missing Values":
+        elif action_type == "Add Calculated Column":
+            dataset = dataset.with_column(pl.eval(parameters["formula"]).alias(parameters["new_column"]))
+        
+        elif action_type == "Fill Missing Values":
             if parameters["method"] == "Specific Value":
                 dataset = dataset.fill_null(pl.lit(parameters["value"]))
             elif parameters["method"] == "Mean":
@@ -132,21 +163,22 @@ def apply_operations_to_dataset(dataset, operations):
                 mode = dataset[parameters["column"]].mode()[0]
                 dataset = dataset.fill_null(mode)
         
-        elif operation_type == "Duplicate Column":
-            dataset[f"{parameters['column']}_duplicate"] = dataset[parameters["column"]]
+        elif action_type == "Duplicate Column":
+            dataset = dataset.with_column(dataset[parameters["column"]].alias(f"{parameters['column']}_duplicate"))
         
-        elif operation_type == "Reorder Columns":
-            dataset = dataset[parameters["new_order"]]
+        elif action_type == "Reorder Columns":
+            dataset = dataset.select(parameters["new_order"])
         
-        elif operation_type == "Replace Values":
-            dataset[parameters["column"]].replace(parameters["to_replace"], parameters["replace_with"], inplace=True)
-
-        elif operation_type == "Scale Data":
+        elif action_type == "Replace Values":
+            dataset = dataset.with_column(pl.col(parameters["column"]).replace(parameters["to_replace"], parameters["replace_with"]))
+        
+        # Handle Preprocessing Actions
+        elif action_type == "Scale Data":
             scaler = StandardScaler() if parameters["method"] == "StandardScaler" else MinMaxScaler()
             scaled_data = scaler.fit_transform(dataset[parameters["columns"]])
             dataset = dataset.with_columns([pl.Series(col, scaled_data[:, idx]) for idx, col in enumerate(parameters["columns"])])
         
-        elif operation_type == "Encode Data":
+        elif action_type == "Encode Data":
             if parameters["type"] == "OneHotEncoding":
                 encoder = OneHotEncoder(sparse_output=False, drop='first')
                 encoded_data = encoder.fit_transform(dataset[parameters["columns"]])
@@ -156,9 +188,9 @@ def apply_operations_to_dataset(dataset, operations):
             else:
                 encoder = LabelEncoder()
                 for col in parameters["columns"]:
-                    dataset[col] = encoder.fit_transform(dataset[col])
-
-        elif operation_type == "Impute Missing Values":
+                    dataset = dataset.with_column(pl.col(col).apply(lambda x: encoder.fit_transform(x)))
+        
+        elif action_type == "Impute Missing Values":
             for col in parameters["columns"]:
                 if parameters["method"] == "Mean":
                     mean = dataset[col].mean()
@@ -170,17 +202,18 @@ def apply_operations_to_dataset(dataset, operations):
                     mode = dataset[col].mode()[0]
                     dataset = dataset.fill_null(pl.lit(mode))
 
-        elif operation_type == "Remove Outliers":
+        elif action_type == "Remove Outliers":
             if parameters["method"] == "IQR Method":
                 Q1 = dataset[parameters["column"]].quantile(0.25)
                 Q3 = dataset[parameters["column"]].quantile(0.75)
                 IQR = Q3 - Q1
                 dataset = dataset.filter(~((pl.col(parameters["column"]) < (Q1 - 1.5 * IQR)) | (pl.col(parameters["column"]) > (Q3 + 1.5 * IQR))))
             elif parameters["method"] == "Z-Score Method":
-                dataset = dataset[(zscore(dataset[parameters["column"]]).abs() < 3)]
-
-        elif operation_type == "Merge Datasets":
-            from models import get_db, DatasetOperation, Dataset, DatasetVersion
+                z_scores = zscore(dataset[parameters["column"]])
+                dataset = dataset.filter(pl.col(parameters["column"]).apply(lambda x: abs(x) < 3))
+        
+        elif action_type == "Merge Datasets":
+            from models import get_db, DatasetAction, Dataset, DatasetVersion  # Import the Dataset model and database session
             from sqlalchemy.orm import Session
 
             merge_with = parameters["merge_with"]
@@ -188,7 +221,9 @@ def apply_operations_to_dataset(dataset, operations):
             join_type = parameters["join_type"]
             merge_version_num = parameters["merge_version"]
             
+            # Load the dataset to merge with
             db: Session = next(get_db())
+
             selected_dataset = db.query(Dataset).filter(Dataset.id == merge_with).first()
 
             selected_version = db.query(DatasetVersion).filter(
@@ -197,10 +232,31 @@ def apply_operations_to_dataset(dataset, operations):
             ).first()
             selected_data = load_data(selected_version.dataset.filepath)
 
-            operations = db.query(DatasetOperation).filter(DatasetOperation.version_id == selected_version.id).all()
-            if operations:
-                selected_data = apply_operations_to_dataset(selected_data, operations)
+            # Apply actions recorded for the selected version
+            actions = db.query(DatasetAction).filter(DatasetAction.version_id == selected_version.id).all()
+            if actions:
+                selected_data = apply_actions_to_dataset(selected_data, actions)
 
-            dataset = pd.merge(dataset, selected_data, on=merge_column, how=join_type)
+            # Perform the merge between the original dataset and the selected merge dataset version
+            dataset = dataset.join(selected_data, on=merge_column, how=join_type)
 
     return dataset
+
+def extract_bounds_from_lambda(lambda_condition):
+    """
+    Extracts the lower and upper bounds from a lambda condition like "lambda x: 20.0 <= x <= 30.0".
+    Returns a tuple of (lower_bound, upper_bound).
+    """
+    # Parse the lambda condition into an AST (Abstract Syntax Tree)
+    tree = ast.parse(lambda_condition, mode='eval')
+    
+    # We expect the structure: lambda x: lower <= x <= upper
+    # Check if the tree matches this structure
+    if isinstance(tree.body, ast.Lambda) and isinstance(tree.body.body, ast.Compare):
+        # Extract the lower bound, which is the left operand of the first comparison
+        lower_bound = tree.body.body.left.n
+        # Extract the upper bound, which is the right operand of the second comparison
+        upper_bound = tree.body.body.comparators[1].n
+        return lower_bound, upper_bound
+    else:
+        raise ValueError("Invalid lambda condition format")
