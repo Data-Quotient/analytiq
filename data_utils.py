@@ -168,7 +168,7 @@ def apply_operations_to_dataset(dataset, operations):
         
         elif operation_type == "Encode Data":
             if parameters["type"] == "OneHotEncoding":
-                encoder = OneHotEncoder(sparse=False, drop='first')
+                encoder = OneHotEncoder(sparse_output=False, drop='first')
                 encoded_data = encoder.fit_transform(dataset.select(parameters["columns"]).to_numpy())
                 encoded_df = pl.DataFrame(encoded_data, schema=encoder.get_feature_names_out(parameters["columns"]).tolist())
                 dataset = dataset.drop(parameters["columns"]).hstack(encoded_df)

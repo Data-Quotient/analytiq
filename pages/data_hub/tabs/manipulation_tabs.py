@@ -191,7 +191,11 @@ def handle_preprocessing_tab(filtered_data: pl.DataFrame, selected_version):
             log_operation(selected_version.id, "Scale Data", {"columns": selected_columns, "method": scaling_method})
 
     elif operation == "Encode Categorical Variables":
-        selected_columns = st.multiselect("Select Columns to Encode", filtered_data.select_dtypes(include=['object']).columns)
+        # selected_columns = st.multiselect("Select Columns to Encode", filtered_data.select_dtypes(include=['object']).columns)
+        selected_columns = st.multiselect(
+            "Select Columns to Encode", 
+            filtered_data.select(pl.col(pl.Utf8)).columns
+        )
         encoding_type = st.selectbox("Select Encoding Type", ["OneHotEncoding", "LabelEncoding"])
         if st.button("Encode Data"):
             if encoding_type == "OneHotEncoding":
@@ -201,9 +205,14 @@ def handle_preprocessing_tab(filtered_data: pl.DataFrame, selected_version):
                 filtered_data = pl.from_pandas(filtered_data)
             else:
                 encoder = LabelEncoder()
-                filtered_data = filtered_data.with_columns([
-                    pl.col(col).apply(lambda x: encoder.fit_transform(x), return_dtype=pl.Int64).alias(col) for col in selected_columns
-                ])
+                encoded_columns = []
+                for col in selected_columns:
+                    column_data = filtered_data[col].to_list()
+                    encoded_data = encoder.fit_transform(column_data)
+                    encoded_series = pl.Series(col, encoded_data)
+                    encoded_columns.append(encoded_series)
+                filtered_data = filtered_data.with_columns(encoded_columns)
+
             st.write(f"Encoded columns: {', '.join(selected_columns)} using {encoding_type}")
             log_operation(selected_version.id, "Encode Data", {"columns": selected_columns, "type": encoding_type})
 
