@@ -2,6 +2,7 @@ import streamlit as st
 from sqlalchemy.orm import Session
 from models import Dataset, DQRule, get_db
 import polars as pl
+from constants import DQ_RULES
 
 def main():
     st.title("Data Quality Rules")
@@ -24,18 +25,18 @@ def main():
         df = pl.read_parquet(selected_dataset.filepath)
         columns = df.columns
 
-        rule_type = st.selectbox("Rule Type", ["Range Check", "Null Check", "Uniqueness Check", "Custom Lambda"])
+        rule_type = st.selectbox("Rule Type", [rule.value for rule in DQ_RULES])
         
         with st.form("define_rule"):
             rule_name = st.text_input("Rule Name")
             target_columns = st.multiselect("Target Columns", columns)
             
             condition = None
-            if rule_type == "Range Check":
+            if rule_type == DQ_RULES.RANGE_CHECK.value:
                 min_value = st.number_input("Minimum Value", value=0.0)
                 max_value = st.number_input("Maximum Value", value=100.0)
                 condition = f"lambda x: {min_value} <= x <= {max_value}"
-            elif rule_type == "Custom Lambda":
+            elif rule_type == DQ_RULES.CUSTOM_LAMBDA.value:
                 condition = st.text_input("Condition (Lambda)")
 
             severity = st.selectbox("Severity", ["Warning", "Error"])
@@ -44,20 +45,25 @@ def main():
             submitted = st.form_submit_button("Add Rule")
             
             if submitted:
-                for target_column in target_columns:
-                    dynamic_message = description.replace("${col_name}", target_column)
-                    new_rule = DQRule(
-                        dataset_id=selected_dataset.id,
-                        rule_name=rule_name,
-                        rule_type=rule_type,
-                        target_column=target_column,
-                        condition=condition if condition else "",
-                        severity=severity,
-                        message=dynamic_message
-                    )
-                    db.add(new_rule)
-                db.commit()
-                st.success(f"Rule '{rule_name}' added successfully!")
+                if rule_name.strip() == "":
+                    st.error("Please provide a Rule Name")
+                elif description.strip() == "":
+                    st.error("Please provide a Rule Description")
+                else:
+                    for target_column in target_columns:
+                        dynamic_message = description.replace("${col_name}", target_column)
+                        new_rule = DQRule(
+                            dataset_id=selected_dataset.id,
+                            rule_name=rule_name,
+                            rule_type=rule_type,
+                            target_column=target_column,
+                            condition=condition if condition else "",
+                            severity=severity,
+                            message=dynamic_message
+                        )
+                        db.add(new_rule)
+                    db.commit()
+                    st.success(f"Rule '{rule_name}' added successfully!")
         
         st.subheader(f"Existing Rules for {selected_dataset_name}")
         rules = db.query(DQRule).filter(DQRule.dataset_id == selected_dataset.id).all()

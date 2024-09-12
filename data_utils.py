@@ -6,6 +6,7 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, L
 from scipy.stats import zscore
 from polars_datatypes import NUMERIC_TYPES, DATA_TYPE_OPTIONS
 import ast
+from constants import DQ_RULES
 
 # Function to load datasets
 def load_datasets(folder_path):
@@ -76,17 +77,18 @@ def apply_dq_rules(df, rules):
                 raise KeyError(f"Column '{target_column}' not found.")
 
             # Define the condition based on the rule type
-            if rule.rule_type == "Range Check":
+            condition = ""
+            if rule.rule_type == DQ_RULES.RANGE_CHECK.value:
                 lower_bound, upper_bound = extract_bounds_from_lambda(rule.condition)
                 condition = (pl.col(target_column) > lower_bound) & (pl.col(target_column) < upper_bound)
-            elif rule.rule_type == "Null Check":
+            elif rule.rule_type == DQ_RULES.NULL_CHECK.value:
                 condition = pl.col(target_column).is_not_null()
             
-            elif rule.rule_type == "Uniqueness Check":
+            elif rule.rule_type == DQ_RULES.UNIQUENESS_CHECK.value:
                 # Polars uniqueness check is done differently: first, convert to list and check uniqueness
                 condition = (pl.col(target_column).n_unique() == pl.count())
             
-            elif rule.rule_type == "Custom Lambda":
+            elif rule.rule_type == DQ_RULES.CUSTOM_LAMBDA.value:
                 lambda_func = eval(rule.condition)
                 condition = pl.when(pl.col(target_column).map_elements(lambda_func)).then(True).otherwise(False)
             # Applying the condition and checking if any violations exist
@@ -103,14 +105,14 @@ def apply_dq_rules(df, rules):
             violations.append({
                 'column': target_column,
                 'message': f"Column '{target_column}' not found. It may have been dropped during data manipulation.",
-                'severity': 'High'  # Adjust severity as needed
+                'severity': 'Warning'  # Adjust severity as needed
             })
         except Exception as e:
             # Handle any other unexpected errors
             violations.append({
                 'column': target_column,
                 'message': f"Error applying rule: {str(e)}",
-                'severity': 'High'
+                'severity': 'Error'
             }) 
     
     return violations
