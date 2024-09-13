@@ -132,10 +132,10 @@ def apply_operations_to_dataset(dataset, operations):
             dataset = dataset.drop(parameters["columns"])
         
         elif operation_type == "Filter Rows":
-            dataset = dataset.filter(pl.col(parameters["condition"]))
+            dataset = dataset.filter(eval(parameters["condition"]))
         
         elif operation_type == "Add Calculated Column":
-            dataset = dataset.with_columns(eval(parameters["formula"], {'__builtins__': None}, dataset.to_dict(False)).alias(parameters["new_column"]))
+            dataset = dataset.with_columns(eval(parameters["formula"]).alias(parameters["new_column"]))
         
         elif operation_type == "Fill Missing Values":
             if parameters["method"] == "Specific Value":

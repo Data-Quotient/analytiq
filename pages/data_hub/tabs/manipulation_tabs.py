@@ -3,6 +3,7 @@ import streamlit as st
 import polars as pl
 
 import pandas as pd
+import re
 
 from models import get_db, DatasetOperation, Dataset, DatasetVersion  # Import the Dataset model and database session
 from sqlalchemy.orm import Session
@@ -82,23 +83,32 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
             st.write(f"Deleted columns: {', '.join(selected_columns)}")
             log_operation(selected_version.id, "Delete Column", {"columns": selected_columns})
 
-    elif operation == "Filter Rows": # TODO: Fix this
-        filter_condition = st.text_input("Enter Filter Condition (e.g., `age >= 18`)")
+    elif operation == "Filter Rows":
+        # use_raw_formula = st.checkbox('Use Raw Polars formula like `(pl.col("age") > 10) & (pl.col("salary") < 50000)`')
+        filter_condition = st.text_input("Enter Filter Condition (e.g., `(${age} > 10) & (${salary} < 50000)`)")
+        # if not use_raw_formula:
+        #     filter_condition = convert_filter_condition_to_pl(filter_condition)
         if st.button("Apply Filter"):
             try:
-                filtered_data = filtered_data.filter(pl.col(filter_condition))
+                filter_condition = parse_filter_condition(filter_condition, filtered_data.columns)
+                filtered_data = filtered_data.filter(eval(filter_condition))
                 st.write(f"Applied filter: {filter_condition}")
                 log_operation(selected_version.id, "Filter Rows", {"condition": filter_condition})
             except Exception as e:
                 st.error(f"Error applying filter: {e}")
-    elif operation == "Add Calculated Column": # TODO: Fix this
+    elif operation == "Add Calculated Column":
         new_column_name = st.text_input("Enter New Column Name")
-        formula = st.text_input("Enter Formula (e.g., `quantity * price`)")
+        # use_raw_formula = st.checkbox('Use Raw Polars formula like `pl.when(pl.col("Age") > 20).then(1).otherwise(-1)`')
+        formula = st.text_input("Enter Formula (e.g., `1 if ${Age} > 20 else -1`)")
+        # if not use_raw_formula: 
+        #     formula = convert_expression_to_pl(formula)
         if st.button("Add Calculated Column"):
             try:
-                filtered_data = filtered_data.with_columns([
-                    pl.eval(pl.col(formula)).alias(new_column_name)
-                ])
+                formula = parse_filter_condition(formula, filtered_data.columns)
+                formula = dynamic_condition_to_polars(formula)
+                filtered_data = filtered_data.with_columns(
+                    (eval(formula)).alias(new_column_name)
+                )
                 st.write(f"Added calculated column {new_column_name} with formula: {formula}")
                 log_operation(selected_version.id, "Add Calculated Column", {"new_column": new_column_name, "formula": formula})
             except Exception as e:
@@ -376,3 +386,79 @@ def merge_datasets(active_data: pl.DataFrame, dataset_id, version_name, merge_co
         return None
 
     return merged_data
+
+def convert_expression_to_pl(input_string):
+    # Define a pattern to find variables inside ${} with spaces allowed in the column name
+    pattern = re.compile(r'\$\{([a-zA-Z_ ]+)\}')
+    
+    # Replace the if-else syntax
+    input_string = re.sub(r'(.+?)\s+if\s+(.+?)\s+else\s+(.+)', 
+                          r'pl.when(\2).then(\1).otherwise(\3)', input_string)
+    
+    # Find all occurrences of the variables pattern
+    variables = pattern.findall(input_string)
+    
+    # Replace each occurrence of ${variable} with `pl.col("variable")`
+    for var in variables:
+        # Strip any leading/trailing whitespace around the variable name (in case)
+        var_clean = var.strip()
+        input_string = input_string.replace(f"${{{var}}}", f'pl.col("{var_clean}")')
+    
+    return input_string
+
+def convert_filter_condition_to_pl(input_string):
+    # Define a pattern to find variables inside ${} with spaces allowed in the column name
+    pattern = re.compile(r'\$\{([a-zA-Z_ ]+)\}')
+    
+    # Find all occurrences of the variables pattern
+    variables = pattern.findall(input_string)
+    
+    # Replace each occurrence of ${variable} with `pl.col("variable")`
+    for var in variables:
+        # Strip any leading/trailing whitespace around the variable name (in case)
+        var_clean = var.strip()
+        input_string = input_string.replace(f"${{{var}}}", f'pl.col("{var_clean}")')
+    
+    return input_string
+
+# Function to sanitize and parse user input
+# Makes sure the passed condition has columns that are present in the df
+def parse_filter_condition(condition, df_columns):
+    # Function to replace placeholders like ${column_name} with pl.col('column_name')
+    def replacer(match):
+        column_name = match.group(1)
+        if column_name in df_columns:
+            return f"pl.col('{column_name}')"
+        else:
+            raise ValueError(f"Invalid column name: {column_name}")
+
+    # Replace placeholders in the condition string
+    try:
+        condition = re.sub(r"\$\{(\w+)\}", replacer, condition)
+    except Exception as e:
+        raise ValueError(f"Error in filter expression: {e}")
+    return condition
+
+def dynamic_condition_to_polars(condition: str):
+    condition = condition.strip()
+    
+    # Check if the condition is a simple value (no "if" or "else" keywords)
+    if "if" not in condition and "else" not in condition:
+        # Return the simple expression as a string without evaluation
+        return condition
+    
+    # Otherwise, handle the conditional expression
+    # Extract the `then` part and the `else` part
+    then_part, else_part = condition.split("else")
+    then_value, if_condition = then_part.split("if")
+    then_value = then_value.strip()
+    
+    # Now extract the Polars column condition part (e.g., "pl.col('age') > 20")
+    if_condition = if_condition.strip()
+    
+    # Just use the string as is
+    then_expr = then_value
+    else_value = else_part.strip()
+    
+    # Return the string representation of the Polars expression
+    return f"pl.when({if_condition}).then({then_expr}).otherwise({else_value})"
