@@ -23,8 +23,8 @@ def handle_data_quality_tab(filtered_data, dataset_id):
         container.write("Data Quality Issues Found 🚨")
         for violation in violations:
             if violation['severity'] == 'Error':
-                container.error(f"{violation['severity']}: {violation['message']} in column {violation['column']}")
+                container.error(f"❗Issue with column '{violation['column']}': {violation['message']}")
             else:
-                container.warning(f"{violation['severity']}: {violation['message']} in column {violation['column']}")
+                container.warning(f"❗Issue with column '{violation['column']}': {violation['message']}")
     else:
         st.success("No data quality issues found!")
