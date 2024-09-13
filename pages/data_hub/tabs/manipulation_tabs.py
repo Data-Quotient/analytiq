@@ -98,14 +98,16 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
                 st.error(f"Error applying filter: {e}")
     elif operation == "Add Calculated Column":
         new_column_name = st.text_input("Enter New Column Name")
-        use_raw_formula = st.checkbox('Use Raw Polars formula like `pl.when(pl.col("Age") > 20).then(1).otherwise(-1)`')
+        # use_raw_formula = st.checkbox('Use Raw Polars formula like `pl.when(pl.col("Age") > 20).then(1).otherwise(-1)`')
         formula = st.text_input("Enter Formula (e.g., `1 if ${Age} > 20 else -1`)")
-        if not use_raw_formula: 
-            formula = convert_expression_to_pl(formula)
+        # if not use_raw_formula: 
+        #     formula = convert_expression_to_pl(formula)
         if st.button("Add Calculated Column"):
             try:
+                formula = parse_filter_condition(formula, filtered_data.columns)
+                formula = dynamic_condition_to_polars(formula)
                 filtered_data = filtered_data.with_columns(
-                    eval(formula).alias(new_column_name)
+                    (eval(formula)).alias(new_column_name)
                 )
                 st.write(f"Added calculated column {new_column_name} with formula: {formula}")
                 log_operation(selected_version.id, "Add Calculated Column", {"new_column": new_column_name, "formula": formula})
@@ -420,6 +422,7 @@ def convert_filter_condition_to_pl(input_string):
     return input_string
 
 # Function to sanitize and parse user input
+# Makes sure the passed condition has columns that are present in the df
 def parse_filter_condition(condition, df_columns):
     # Function to replace placeholders like ${column_name} with pl.col('column_name')
     def replacer(match):
@@ -435,3 +438,27 @@ def parse_filter_condition(condition, df_columns):
     except Exception as e:
         raise ValueError(f"Error in filter expression: {e}")
     return condition
+
+def dynamic_condition_to_polars(condition: str):
+    condition = condition.strip()
+    
+    # Check if the condition is a simple value (no "if" or "else" keywords)
+    if "if" not in condition and "else" not in condition:
+        # Return the simple expression as a string without evaluation
+        return condition
+    
+    # Otherwise, handle the conditional expression
+    # Extract the `then` part and the `else` part
+    then_part, else_part = condition.split("else")
+    then_value, if_condition = then_part.split("if")
+    then_value = then_value.strip()
+    
+    # Now extract the Polars column condition part (e.g., "pl.col('age') > 20")
+    if_condition = if_condition.strip()
+    
+    # Just use the string as is
+    then_expr = then_value
+    else_value = else_part.strip()
+    
+    # Return the string representation of the Polars expression
+    return f"pl.when({if_condition}).then({then_expr}).otherwise({else_value})"
