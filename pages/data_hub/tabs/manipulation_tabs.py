@@ -83,16 +83,19 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
             st.write(f"Deleted columns: {', '.join(selected_columns)}")
             log_operation(selected_version.id, "Delete Column", {"columns": selected_columns})
 
-    elif operation == "Filter Rows": # TODO: Fix this
-        filter_condition = st.text_input("Enter Filter Condition (e.g., `age >= 18`)")
+    elif operation == "Filter Rows":
+        use_raw_formula = st.checkbox('Use Raw Polars formula like `(pl.col("age") > 10) & (pl.col("salary") < 50000)`')
+        filter_condition = st.text_input("Enter Filter Condition (e.g., `(${age} > 10) & (${salary} < 50000)`)")
+        if not use_raw_formula:
+            filter_condition = convert_filter_condition_to_pl(filter_condition)
         if st.button("Apply Filter"):
             try:
-                filtered_data = filtered_data.filter(pl.col(filter_condition))
+                filtered_data = filtered_data.filter(eval(filter_condition))
                 st.write(f"Applied filter: {filter_condition}")
                 log_operation(selected_version.id, "Filter Rows", {"condition": filter_condition})
             except Exception as e:
                 st.error(f"Error applying filter: {e}")
-    elif operation == "Add Calculated Column": # TODO: Fix this
+    elif operation == "Add Calculated Column":
         new_column_name = st.text_input("Enter New Column Name")
         use_raw_formula = st.checkbox('Use Raw Polars formula like `pl.when(pl.col("Age") > 20).then(1).otherwise(-1)`')
         formula = st.text_input("Enter Formula (e.g., `1 if ${Age} > 20 else -1`)")
@@ -388,6 +391,21 @@ def convert_expression_to_pl(input_string):
     # Replace the if-else syntax
     input_string = re.sub(r'(.+?)\s+if\s+(.+?)\s+else\s+(.+)', 
                           r'pl.when(\2).then(\1).otherwise(\3)', input_string)
+    
+    # Find all occurrences of the variables pattern
+    variables = pattern.findall(input_string)
+    
+    # Replace each occurrence of ${variable} with `pl.col("variable")`
+    for var in variables:
+        # Strip any leading/trailing whitespace around the variable name (in case)
+        var_clean = var.strip()
+        input_string = input_string.replace(f"${{{var}}}", f'pl.col("{var_clean}")')
+    
+    return input_string
+
+def convert_filter_condition_to_pl(input_string):
+    # Define a pattern to find variables inside ${} with spaces allowed in the column name
+    pattern = re.compile(r'\$\{([a-zA-Z_ ]+)\}')
     
     # Find all occurrences of the variables pattern
     variables = pattern.findall(input_string)
