@@ -3,6 +3,7 @@ import streamlit as st
 import polars as pl
 
 import pandas as pd
+import re
 
 from models import get_db, DatasetOperation, Dataset, DatasetVersion  # Import the Dataset model and database session
 from sqlalchemy.orm import Session
@@ -93,12 +94,15 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
                 st.error(f"Error applying filter: {e}")
     elif operation == "Add Calculated Column": # TODO: Fix this
         new_column_name = st.text_input("Enter New Column Name")
-        formula = st.text_input("Enter Formula (e.g., `quantity * price`)")
+        use_raw_formula = st.checkbox('Use Raw Polars formula like `pl.when(pl.col("Age") > 20).then(1).otherwise(-1)`')
+        formula = st.text_input("Enter Formula (e.g., `1 if ${Age} > 20 else -1`)")
+        if not use_raw_formula: 
+            formula = convert_expression_to_pl(formula)
         if st.button("Add Calculated Column"):
             try:
-                filtered_data = filtered_data.with_columns([
-                    pl.eval(pl.col(formula)).alias(new_column_name)
-                ])
+                filtered_data = filtered_data.with_columns(
+                    eval(formula).alias(new_column_name)
+                )
                 st.write(f"Added calculated column {new_column_name} with formula: {formula}")
                 log_operation(selected_version.id, "Add Calculated Column", {"new_column": new_column_name, "formula": formula})
             except Exception as e:
@@ -376,3 +380,22 @@ def merge_datasets(active_data: pl.DataFrame, dataset_id, version_name, merge_co
         return None
 
     return merged_data
+
+def convert_expression_to_pl(input_string):
+    # Define a pattern to find variables inside ${} with spaces allowed in the column name
+    pattern = re.compile(r'\$\{([a-zA-Z_ ]+)\}')
+    
+    # Replace the if-else syntax
+    input_string = re.sub(r'(.+?)\s+if\s+(.+?)\s+else\s+(.+)', 
+                          r'pl.when(\2).then(\1).otherwise(\3)', input_string)
+    
+    # Find all occurrences of the variables pattern
+    variables = pattern.findall(input_string)
+    
+    # Replace each occurrence of ${variable} with `pl.col("variable")`
+    for var in variables:
+        # Strip any leading/trailing whitespace around the variable name (in case)
+        var_clean = var.strip()
+        input_string = input_string.replace(f"${{{var}}}", f'pl.col("{var_clean}")')
+    
+    return input_string
