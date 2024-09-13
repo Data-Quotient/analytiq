@@ -84,12 +84,13 @@ def handle_data_manipulation_tab(filtered_data: pl.DataFrame, selected_version):
             log_operation(selected_version.id, "Delete Column", {"columns": selected_columns})
 
     elif operation == "Filter Rows":
-        use_raw_formula = st.checkbox('Use Raw Polars formula like `(pl.col("age") > 10) & (pl.col("salary") < 50000)`')
+        # use_raw_formula = st.checkbox('Use Raw Polars formula like `(pl.col("age") > 10) & (pl.col("salary") < 50000)`')
         filter_condition = st.text_input("Enter Filter Condition (e.g., `(${age} > 10) & (${salary} < 50000)`)")
-        if not use_raw_formula:
-            filter_condition = convert_filter_condition_to_pl(filter_condition)
+        # if not use_raw_formula:
+        #     filter_condition = convert_filter_condition_to_pl(filter_condition)
         if st.button("Apply Filter"):
             try:
+                filter_condition = parse_filter_condition(filter_condition, filtered_data.columns)
                 filtered_data = filtered_data.filter(eval(filter_condition))
                 st.write(f"Applied filter: {filter_condition}")
                 log_operation(selected_version.id, "Filter Rows", {"condition": filter_condition})
@@ -417,3 +418,20 @@ def convert_filter_condition_to_pl(input_string):
         input_string = input_string.replace(f"${{{var}}}", f'pl.col("{var_clean}")')
     
     return input_string
+
+# Function to sanitize and parse user input
+def parse_filter_condition(condition, df_columns):
+    # Function to replace placeholders like ${column_name} with pl.col('column_name')
+    def replacer(match):
+        column_name = match.group(1)
+        if column_name in df_columns:
+            return f"pl.col('{column_name}')"
+        else:
+            raise ValueError(f"Invalid column name: {column_name}")
+
+    # Replace placeholders in the condition string
+    try:
+        condition = re.sub(r"\$\{(\w+)\}", replacer, condition)
+    except Exception as e:
+        raise ValueError(f"Error in filter expression: {e}")
+    return condition
